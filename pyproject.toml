@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rswd-cli"
+version = "0.1.0"
+description = "CLI-based automated music library manager using streaming services"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+keywords = ["music", "deezer", "tidal", "streamrip", "rswd"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio",
+]
+
+dependencies = [
+    "click>=8.1",
+    "rich>=13.0",
+    "apscheduler>=3.10,<4.0",
+    "streamrip>=1.5",
+    "mutagen>=1.47",
+    "importlib_resources>=6.0; python_version < '3.13'",
+]
+
+[project.optional-dependencies]
+metadata = ["musicbrainzngs>=0.7.1", "pyacoustid>=1.3", "httpx>=0.27"]
+dev = ["pytest>=8.0", "pytest-cov", "pytest-httpx", "pytest-asyncio", "vcrpy", "musicbrainzngs>=0.7.1", "pyacoustid>=1.3", "httpx>=0.27"]
+
+[project.scripts]
+rswd = "rswd.__main__:cli"
+
+[project.entry-points."rswd.backends"]
+streamrip = "rswd.backends.streamrip_:StreamripBackend"
+orpheus = "rswd.backends.orpheus:OrpheusBackend"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["rswd*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["rswd"]

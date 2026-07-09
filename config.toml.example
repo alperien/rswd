@@ -1,0 +1,71 @@
+[core]
+download_path = "~/music"
+library_db = ""
+jobs_db = ""
+log_level = "INFO"
+
+[daemon]
+enabled = false
+check_interval_hours = 24
+check_at_startup = true
+
+[quality]
+default = 2
+codec = "FLAC"
+concurrency = 3
+
+[filepaths]
+album_folder = "{albumartist}/{album} ({year})"
+track_file = "{tracknum:02d}. {artist} - {title}{ext}"
+
+[metadata]
+embed_cover = true
+cover_size = 1400
+min_cover_bytes = 30000
+cover_fallback = true
+
+[metadata.lyrics]
+embed = true
+prefer_synced = true
+providers = ["lrclib"]
+
+[metadata.musicbrainz]
+enrichment = false
+rate_limit = 1.0
+
+[metadata.replaygain]
+enabled = false
+mode = "album"
+
+[metadata.acoustid]
+enabled = false
+api_key = ""
+
+[backend]
+name = "streamrip"
+
+[backend.streamrip]
+config_path = ""
+
+[backend.orpheusdl]
+install_path = ""
+
+[services.deezer]
+arl = ""
+
+[services.tidal]
+access_token = ""
+refresh_token = ""
+user_id = ""
+country_code = ""
+token_expiry = ""
+
+[services.qobuz]
+email_or_userid = ""
+password_or_token = ""
+app_id = ""
+secrets = []
+
+[services.soundcloud]
+client_id = ""
+app_version = ""
