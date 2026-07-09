@@ -12,7 +12,7 @@ from rswd.web.download_manager import DlStatus, DownloadManager
 router = APIRouter()
 
 
-@router.get("")
+@router.get("/")
 async def queue_page(request: Request):
     repo = get_repo(request)
     templates = get_templates(request)

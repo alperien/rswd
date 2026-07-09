@@ -7,7 +7,7 @@ from rswd.web.deps import get_repo, get_templates
 router = APIRouter()
 
 
-@router.get("")
+@router.get("/")
 async def library_page(request: Request):
     templates = get_templates(request)
     return templates.TemplateResponse(request, "library/browse.html")

@@ -12,7 +12,7 @@ logger = logging.getLogger("rswd.web.missing")
 router = APIRouter()
 
 
-@router.get("")
+@router.get("/")
 async def missing_page(request: Request):
     repo = get_repo(request)
     templates = get_templates(request)

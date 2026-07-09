@@ -9,7 +9,7 @@ from rswd.web.deps import get_templates
 router = APIRouter()
 
 
-@router.get("")
+@router.get("/")
 async def daemon_page(request: Request):
     templates = get_templates(request)
     state = get_state()

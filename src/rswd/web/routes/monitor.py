@@ -8,7 +8,7 @@ from rswd.web.deps import get_repo, get_templates
 router = APIRouter()
 
 
-@router.get("")
+@router.get("/")
 async def monitor_page(request: Request):
     repo = get_repo(request)
     templates = get_templates(request)

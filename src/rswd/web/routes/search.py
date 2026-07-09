@@ -19,13 +19,13 @@ logger = logging.getLogger("rswd.web.search")
 router = APIRouter()
 
 
-@router.get("")
+@router.get("/")
 async def search_page(request: Request):
     templates = get_templates(request)
     return templates.TemplateResponse(request, "search/page.html")
 
 
-@router.post("")
+@router.post("/query")
 async def search_execute(request: Request, query: str = ""):
     templates = get_templates(request)
     if not query.strip():
