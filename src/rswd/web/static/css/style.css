@@ -135,10 +135,15 @@ button:active { background: #555; }
 }
 .album-year { font-size: 10px; color: #888; }
 
+.status-q { color: #888; }
 .status-d { color: #6f6; }
 .status-p { color: #fc0; }
 .status-x { color: #f66; }
 .status-n { color: #888; }
+.status-completed { color: #6f6; }
+.status-downloading { color: #fc0; }
+.status-queued { color: #888; }
+.status-failed { color: #f66; }
 
 /* track table */
 table { width: 100%; border-collapse: collapse; font-size: 11px; }

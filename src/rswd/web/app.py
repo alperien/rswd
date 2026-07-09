@@ -10,6 +10,7 @@ from fastapi.templating import Jinja2Templates
 
 from rswd.config import ConfigData as Config
 from rswd.db.repository import Repository
+from rswd.web.download_manager import DownloadManager
 from rswd.web.routes import library, search, monitor, queue, daemon, import_, missing, config_
 
 
@@ -26,6 +27,7 @@ async def lifespan(app: FastAPI):
 def create_app(config: Config) -> FastAPI:
     app = FastAPI(lifespan=lifespan)
     app.state.config = config
+    app.state.download_manager = DownloadManager()
 
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     app.state.templates = templates

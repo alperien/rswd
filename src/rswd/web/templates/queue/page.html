@@ -7,5 +7,8 @@
   <div class="stat"><div class="stat-value">{{ stats.tracks }}</div><div class="stat-label">Tracks</div></div>
   <div class="stat"><div class="stat-value">{{ stats.downloaded }}</div><div class="stat-label">Downloaded</div></div>
 </div>
-<div class="empty">Active downloads and history will appear here.</div>
+<h2>Active Downloads</h2>
+<div id="task-list" hx-get="/queue/tasks" hx-trigger="load delay:1s" hx-swap="innerHTML">
+  <div class="empty">Loading...</div>
+</div>
 {% endblock %}

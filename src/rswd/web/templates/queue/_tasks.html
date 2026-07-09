@@ -1,0 +1,18 @@
+{% if tasks %}
+<table>
+<thead><tr><th>Artist</th><th>Album</th><th>Status</th><th>Progress</th><th>Started</th></tr></thead>
+<tbody>
+{% for t in tasks %}
+<tr>
+  <td>{{ t.artist_name }}</td>
+  <td>{{ t.album_title }}</td>
+  <td class="status-{{ t.status.value[0] }}">{{ t.status.value }}</td>
+  <td>{{ t.progress or '--' }}</td>
+  <td>{{ t.created_at[:19] }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% else %}
+<div class="empty">No active downloads</div>
+{% endif %}
