@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from streamrip import Config as RpConfig  # type: ignore[import-untyped]
+from streamrip.config import BLANK_CONFIG_PATH  # type: ignore[import-untyped]
 
 from rswd.backends.base import (
     AlbumInfo,
@@ -57,12 +58,13 @@ class StreamripBackend(SearchDownloadBackend):
         }
 
     def _build_rp_config(self, cfg: dict) -> RpConfig:
-        rp = RpConfig()
+        rp = RpConfig(BLANK_CONFIG_PATH)
         rp.session.downloads.folder = cfg.get("download_path", "~/music")
         codec = cfg.get("codec")
         rp.session.conversion.enabled = bool(codec)
         rp.session.conversion.codec = (codec or "FLAC").upper()
-        rp.session.downloads.concurrency = cfg.get("concurrency", 3)
+        rp.session.downloads.concurrency = True
+        rp.session.downloads.max_connections = cfg.get("concurrency", 3)
         services = cfg.get("services", {})
         if "deezer" in services:
             rp.session.deezer.arl = services["deezer"].get("arl", "")
