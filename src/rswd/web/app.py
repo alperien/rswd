@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
+import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
@@ -21,6 +22,8 @@ HERE = Path(__file__).resolve().parent
 async def lifespan(app: FastAPI):
     config: Config = app.state.config
     app.state.repo = Repository(config.core.library_db)
+    mgr: DownloadManager = app.state.download_manager
+    mgr.set_loop(asyncio.get_running_loop())
     yield
 
 

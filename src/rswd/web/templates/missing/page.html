@@ -2,6 +2,9 @@
 {% block content %}
 <h2>Missing Albums</h2>
 <p class="infobar">Comparing local library against Deezer discographies...</p>
+{% if errors %}
+<div class="infobar" style="color:#f66">{{ errors|length }} error(s):</div>
+{% endif %}
 <div id="missing-results">
 {% for r in results %}
 <div class="missing-artist">
@@ -24,4 +27,8 @@
 <div class="infobar">No results. Your library is complete! (or Deezer query failed)</div>
 {% endfor %}
 </div>
+{% if errors %}
+<h2>Errors</h2>
+<div class="logs">{% for e in errors %}{{ e }}&#10;{% endfor %}</div>
+{% endif %}
 {% endblock %}

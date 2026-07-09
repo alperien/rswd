@@ -8,7 +8,7 @@
   <div class="stat"><div class="stat-value">{{ stats.downloaded }}</div><div class="stat-label">Downloaded</div></div>
 </div>
 <h2>Active Downloads</h2>
-<div id="task-list" hx-get="/queue/tasks" hx-trigger="load delay:1s" hx-swap="innerHTML">
+<div id="task-list" hx-get="/queue/tasks" hx-trigger="every:5s" hx-swap="innerHTML">
   <div class="empty">Loading...</div>
 </div>
 {% endblock %}

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import json
+
 from fastapi import APIRouter, Request
+from fastapi.responses import StreamingResponse
 
 from rswd.web.deps import get_repo, get_templates
 from rswd.web.download_manager import DlStatus, DownloadManager
@@ -42,4 +46,32 @@ async def task_status(request: Request, task_id: str):
     return templates.TemplateResponse(
         request, "queue/_task_status.html",
         {"task": task, "task_id": task_id},
+    )
+
+
+@router.get("/stream")
+async def queue_stream(request: Request):
+    mgr: DownloadManager = request.app.state.download_manager
+
+    async def event_stream():
+        q = await mgr.subscribe()
+        try:
+            yield "event: connected\ndata: {}\n\n"
+            while True:
+                try:
+                    event, data = await asyncio.wait_for(q.get(), timeout=30)
+                    yield f"event: {event}\ndata: {json.dumps(data)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        finally:
+            mgr.unsubscribe(q)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
