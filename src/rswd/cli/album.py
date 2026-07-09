@@ -180,3 +180,58 @@ def album_download(ctx: click.Context, album_id: int, quality: int | None, lyric
 
         if lyricist:
             lyricist.close()
+
+
+@album.command("fetch")
+@click.argument("query")
+@click.option("--service", default="deezer", help="Service to use (deezer, tidal)")
+@click.option("--quality", type=int, default=None, help="Quality tier override")
+@click.option("--lyrics/--no-lyrics", default=True, help="Embed lyrics after download")
+@click.pass_context
+def album_fetch(ctx: click.Context, query: str, service: str, quality: int | None, lyrics: bool):
+    """Search, add to library, and download an album in one step."""
+    config = ctx.obj["config"]
+    repo = Repository(config.core.library_db)
+
+    searcher = Searcher()
+    try:
+        results = searcher.search_album(query, service=service)
+    finally:
+        searcher.close()
+
+    if not results:
+        click.echo("No results found.")
+        return
+
+    hit = results[0]
+    click.echo(f"Found: {hit.artist} - {hit.title} ({hit.year or '????'}) [{hit.service}]")
+
+    artist = repo.get_artist_by_name(hit.artist)
+    if not artist:
+        aid = repo.add_artist(name=hit.artist, is_monitored=False)
+        artist = repo.get_artist(aid)
+    if not artist:
+        click.echo("Failed to create artist.")
+        return
+    click.echo(f"Artist: '{artist.name}' (id={artist.id})")
+
+    album_id = None
+    for a in repo.list_albums(artist_id=artist.id):
+        if a.title.lower() == hit.title.lower():
+            album_id = a.id
+            click.echo(f"Album already exists (id={album_id})")
+            break
+
+    if album_id is None:
+        alid = repo.add_album(
+            artist_id=artist.id,
+            title=hit.title,
+            year=hit.year,
+            album_type="album",
+            service=hit.service,
+            service_id=hit.service_id,
+        )
+        album_id = alid
+        click.echo(f"Added album '{hit.title}' (id={album_id})")
+
+    ctx.invoke(album_download, album_id=album_id, quality=quality, lyrics=lyrics)
