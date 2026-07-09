@@ -1,0 +1,16 @@
+<div class="pane-header">Artists</div>
+{% if artists %}
+<ul class="artist-list">
+{% for a in artists %}
+<li class="artist-item"
+    hx-get="/library/artists/{{ a.id }}/albums"
+    hx-target="#album-pane"
+    hx-trigger="click"
+    hx-swap="innerHTML">
+  <span class="artist-name">{{ a.name }}</span>
+</li>
+{% endfor %}
+</ul>
+{% else %}
+<div class="empty">No artists found</div>
+{% endif %}

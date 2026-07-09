@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Library Import</h2>
+<form method="post" action="/import">
+  <input type="text" name="source" placeholder="Full path to music directory" style="margin-bottom:0.5rem">
+  <button type="submit">Scan & Import</button>
+</form>
+{% endblock %}

@@ -88,5 +88,36 @@ class Searcher:
             logger.warning("Deezer artist search failed: %s", e)
             return []
 
+    def get_artist_discography(self, artist_name: str) -> list[dict]:
+        """Fetch all albums for an artist from Deezer by name."""
+        try:
+            artist_hits = self._search_deezer_artist(artist_name)
+            if not artist_hits:
+                return []
+            deezer_id = artist_hits[0].service_id
+            resp = self._client.get(
+                f"{DEEZER_API}/artist/{deezer_id}/albums",
+                params={"limit": 100},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            albums: list[dict] = []
+            for item in data.get("data", []):
+                year = None
+                release_date = item.get("release_date", "")
+                if release_date and len(release_date) >= 4:
+                    year = int(release_date[:4])
+                albums.append({
+                    "title": item["title"],
+                    "year": year,
+                    "track_count": item.get("nb_tracks"),
+                    "deezer_id": str(item["id"]),
+                    "type": item.get("record_type", "album"),
+                })
+            return albums
+        except httpx.HTTPError as e:
+            logger.warning("Deezer discography lookup failed for %s: %s", artist_name, e)
+            return []
+
     def close(self):
         self._client.close()

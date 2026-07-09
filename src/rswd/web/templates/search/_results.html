@@ -1,0 +1,19 @@
+{% if results %}
+<table>
+<thead><tr><th>Artist</th><th>Album</th><th>Year</th><th>Type</th><th>Tracks</th><th></th></tr></thead>
+<tbody>
+{% for r in results %}
+<tr>
+  <td>{{ r.artist }}</td>
+  <td>{{ r.album }}</td>
+  <td>{{ r.year or '----' }}</td>
+  <td>{{ r.hit_type }}</td>
+  <td>{{ r.track_count or '?' }}</td>
+  <td><button hx-post="/search/download/{{ r.service }}/{{ r.service_id }}" hx-swap="none">Download</button></td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% else %}
+<div class="empty">No results</div>
+{% endif %}

@@ -1,0 +1,212 @@
+/* foobar2000 brutalist */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; }
+
+body {
+  background: #2a2a2a;
+  color: #c8c8c8;
+  font-family: Tahoma, Verdana, "Lucida Grande", sans-serif;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+#layout { display: flex; height: 100vh; }
+
+#sidebar {
+  width: 160px;
+  background: #1e1e1e;
+  border-right: 1px solid #3c3c3c;
+  flex-shrink: 0;
+}
+#sidebar h1 {
+  font-size: 12px;
+  font-weight: normal;
+  color: #ddd;
+  padding: 6px 8px;
+  background: #222;
+  border-bottom: 1px solid #3c3c3c;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+#sidebar ul { list-style: none; padding: 2px 0; }
+#sidebar li { margin: 0; }
+#sidebar a {
+  display: block;
+  padding: 3px 8px;
+  color: #aaa;
+  text-decoration: none;
+  font-size: 11px;
+}
+#sidebar a:hover { background: #333; color: #ddd; }
+
+#content {
+  flex: 1;
+  padding: 0;
+  overflow-y: auto;
+  background: #2a2a2a;
+}
+
+h2 {
+  font-size: 12px;
+  font-weight: normal;
+  padding: 4px 8px;
+  background: #222;
+  border-bottom: 1px solid #3c3c3c;
+  color: #ddd;
+  text-transform: uppercase;
+}
+
+.infobar {
+  padding: 4px 8px;
+  color: #999;
+  font-size: 11px;
+  border-bottom: 1px solid #333;
+}
+
+input[type="text"], input[type="search"], input[type="password"] {
+  background: #1e1e1e;
+  color: #c8c8c8;
+  border: 1px solid #4a4a4a;
+  padding: 3px 5px;
+  font-family: Tahoma, Verdana, "Lucida Grande", sans-serif;
+  font-size: 11px;
+  width: 100%;
+}
+input:focus { outline: none; border-color: #888; }
+
+button, .btn {
+  background: #3a3a3a;
+  color: #c8c8c8;
+  border: 1px solid #5a5a5a;
+  padding: 3px 10px;
+  font-family: Tahoma, Verdana, "Lucida Grande", sans-serif;
+  font-size: 11px;
+  cursor: pointer;
+}
+button:hover, .btn:hover { background: #4a4a4a; }
+button:active { background: #555; }
+
+/* library panes */
+.panes { display: flex; gap: 0; height: calc(100vh - 28px); }
+.pane {
+  flex: 1;
+  border-right: 1px solid #333;
+  overflow-y: auto;
+  background: #2a2a2a;
+}
+.pane:last-child { border-right: none; }
+.pane-header {
+  font-size: 11px;
+  background: #222;
+  color: #999;
+  padding: 3px 6px;
+  border-bottom: 1px solid #3c3c3c;
+  text-transform: uppercase;
+}
+
+.artist-list { list-style: none; }
+.artist-item {
+  padding: 2px 6px;
+  cursor: pointer;
+  border-bottom: 1px solid #2e2e2e;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.artist-item:nth-child(even) { background: #2e2e2e; }
+.artist-item:hover { background: #3a3a3a; color: #ddd; }
+
+.album-card {
+  display: inline-block;
+  width: 140px;
+  padding: 4px 6px;
+  margin: 2px;
+  cursor: pointer;
+  border: 1px solid #3a3a3a;
+  background: #2a2a2a;
+  vertical-align: top;
+}
+.album-card:hover { background: #333; border-color: #555; }
+.album-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+}
+.album-year { font-size: 10px; color: #888; }
+
+.status-d { color: #6f6; }
+.status-p { color: #fc0; }
+.status-x { color: #f66; }
+.status-n { color: #888; }
+
+/* track table */
+table { width: 100%; border-collapse: collapse; font-size: 11px; }
+thead { position: sticky; top: 0; }
+th {
+  text-align: left;
+  padding: 2px 6px;
+  background: #222;
+  color: #999;
+  font-weight: normal;
+  border-bottom: 1px solid #3c3c3c;
+  white-space: nowrap;
+}
+td { padding: 1px 6px; border-bottom: 1px solid #2e2e2e; white-space: nowrap; }
+tr:nth-child(even) td { background: #2e2e2e; }
+tr:hover td { background: #3a3a3a; }
+
+/* monitor list */
+.monitor-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 8px;
+  border-bottom: 1px solid #2e2e2e;
+}
+
+/* stats bar */
+.stats { display: flex; gap: 0; }
+.stat {
+  flex: 1;
+  padding: 6px 8px;
+  text-align: center;
+  border-right: 1px solid #333;
+  background: #222;
+}
+.stat:last-child { border-right: none; }
+.stat-value { font-size: 14px; font-weight: bold; color: #ddd; }
+.stat-label { font-size: 10px; color: #888; text-transform: uppercase; }
+
+/* log viewer */
+.logs {
+  background: #1a1a1a;
+  color: #aaa;
+  font-family: "Courier New", "Lucida Console", monospace;
+  font-size: 10px;
+  padding: 6px;
+  height: 400px;
+  overflow-y: auto;
+  border: 1px solid #333;
+}
+
+/* placeholder */
+.empty { color: #666; font-style: italic; padding: 20px; text-align: center; font-size: 11px; }
+
+/* missing albums */
+.missing-artist { margin-bottom: 0; border-bottom: 1px solid #333; }
+.missing-header {
+  padding: 3px 8px;
+  background: #222;
+  color: #ccc;
+  font-size: 11px;
+}
+.dim { color: #777; }
+
+/* config form */
+.config-section { padding: 8px; }
+.config-section table { width: auto; }
+.config-section td { padding: 3px 8px; border: none; }
+.config-section td:first-child { color: #999; text-align: right; }
+.config-section input[type="text"],
+.config-section input[type="password"] { width: 250px; }

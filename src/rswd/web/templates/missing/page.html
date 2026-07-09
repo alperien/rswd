@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Missing Albums</h2>
+<p class="infobar">Comparing local library against Deezer discographies...</p>
+<div id="missing-results">
+{% for r in results %}
+<div class="missing-artist">
+  <div class="missing-header">{{ r.artist.name }} <span class="dim">({{ r.total_local }}/{{ r.total_remote }} albums)</span></div>
+  <table>
+    <thead><tr><th>Album</th><th>Year</th><th>Tracks</th><th>Type</th></tr></thead>
+    <tbody>
+    {% for a in r.missing %}
+    <tr>
+      <td>{{ a.title }}</td>
+      <td>{{ a.year or '--' }}</td>
+      <td>{{ a.track_count or '?' }}</td>
+      <td>{{ a.type }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="infobar">No results. Your library is complete! (or Deezer query failed)</div>
+{% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Download Queue</h2>
+<div class="stats">
+  <div class="stat"><div class="stat-value">{{ stats.artists }}</div><div class="stat-label">Artists</div></div>
+  <div class="stat"><div class="stat-value">{{ stats.albums }}</div><div class="stat-label">Albums</div></div>
+  <div class="stat"><div class="stat-value">{{ stats.tracks }}</div><div class="stat-label">Tracks</div></div>
+  <div class="stat"><div class="stat-value">{{ stats.downloaded }}</div><div class="stat-label">Downloaded</div></div>
+</div>
+<div class="empty">Active downloads and history will appear here.</div>
+{% endblock %}

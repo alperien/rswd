@@ -1,0 +1,20 @@
+<div class="pane-header">Albums</div>
+{% if albums %}
+<div>
+{% for a in albums %}
+<div class="album-card"
+     hx-get="/library/albums/{{ a.id }}/tracks"
+     hx-target="#track-pane"
+     hx-trigger="click"
+     hx-swap="innerHTML">
+  <div class="album-title">
+    <span class="status-{{ a.download_status[0] }}">&#9632;</span>
+    {{ a.title }}
+  </div>
+  <div class="album-year">{{ a.year or '----' }}</div>
+</div>
+{% endfor %}
+</div>
+{% else %}
+<div class="empty">No albums found</div>
+{% endif %}

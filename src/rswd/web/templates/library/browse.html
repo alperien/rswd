@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Library</h2>
+<input type="search" placeholder="Filter artists..."
+       hx-get="/library/artists" hx-trigger="keyup changed delay:250ms" hx-target="#artist-pane" name="filter">
+<div class="panes">
+  <div class="pane" id="artist-pane" hx-get="/library/artists" hx-trigger="load">
+    <div class="pane-header">Artists</div>
+    <div class="empty">Loading...</div>
+  </div>
+  <div class="pane" id="album-pane">
+    <div class="pane-header">Albums</div>
+    <div class="empty">Select an artist</div>
+  </div>
+  <div class="pane" id="track-pane">
+    <div class="pane-header">Tracks</div>
+    <div class="empty">Select an album</div>
+  </div>
+</div>
+{% endblock %}

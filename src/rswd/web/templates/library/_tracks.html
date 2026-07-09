@@ -1,0 +1,23 @@
+<div class="pane-header">Tracks</div>
+{% if tracks %}
+<table>
+<thead><tr>
+  <th>#</th><th>Title</th><th>Artist</th><th>Duration</th><th>Format</th><th>Bitrate</th><th>Status</th>
+</tr></thead>
+<tbody>
+{% for t in tracks %}
+<tr>
+  <td>{{ t.track_number or '' }}</td>
+  <td>{{ t.title }}</td>
+  <td>{{ t.artist or '' }}</td>
+  <td>{% if t.duration %}{{ '%.0f'|format(t.duration) }}s{% else %}--{% endif %}</td>
+  <td>{{ t.file_format or '--' }}</td>
+  <td>{% if t.bitrate %}{{ t.bitrate }}{% else %}--{% endif %}</td>
+  <td class="status-{{ t.download_status[0] }}">{{ t.download_status }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% else %}
+<div class="empty">Select an album to view tracks</div>
+{% endif %}
