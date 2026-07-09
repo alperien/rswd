@@ -21,7 +21,7 @@ async def config_page(request: Request):
     })
 
 
-@router.post("/")
+@router.post("/save")
 async def config_save(
     request: Request,
     deezer_arl: str = Form(""),

@@ -3,7 +3,7 @@
 <h2>Configuration</h2>
 <div class="infobar">{{ config_path }}</div>
 <div class="config-section">
-<form method="post" action="/config">
+<form method="post" action="/config/save">
   <h3>Deezer</h3>
   <table>
     <tr><td>ARL Cookie</td><td><input type="password" name="deezer_arl" placeholder="{% if cfg.services.deezer.arl %}********{% endif %}"></td></tr>
