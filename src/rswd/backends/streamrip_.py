@@ -65,6 +65,8 @@ class StreamripBackend(SearchDownloadBackend):
         rp.session.conversion.codec = (codec or "FLAC").upper()
         rp.session.downloads.concurrency = True
         rp.session.downloads.max_connections = cfg.get("concurrency", 3)
+        rp.session.database.downloads_enabled = False
+        rp.session.database.failed_downloads_enabled = False
         services = cfg.get("services", {})
         if "deezer" in services:
             rp.session.deezer.arl = services["deezer"].get("arl", "")
@@ -216,7 +218,10 @@ class StreamripBackend(SearchDownloadBackend):
                     await main.resolve()
                     await main.rip()
             except Exception as e:
-                logger.warning("streamrip download failed: %s", e)
+                if isinstance(e, EOFError) or (isinstance(e, AssertionError) and not e.args):
+                    logger.error("Download failed: Deezer ARL is missing or invalid. Set RSWD_DEEZER_ARL env var or configure via web UI at /config.")
+                else:
+                    logger.exception("streamrip download failed: %s", e)
             return self._scan_output(output_dir, album_info)
 
         return asyncio.run(_download())
