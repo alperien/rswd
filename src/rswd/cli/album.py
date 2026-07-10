@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 
 import click
@@ -56,8 +57,7 @@ def album_list(ctx: click.Context, artist_id: int | None, status: str | None):
 @click.pass_context
 def album_search(ctx: click.Context, query: str, service: str):
     """Search for albums across streaming services."""
-    searcher = Searcher()
-    try:
+    with Searcher() as searcher:
         results = searcher.search_album(query, service=service)
         if not results:
             click.echo("No results found.")
@@ -74,8 +74,6 @@ def album_search(ctx: click.Context, query: str, service: str):
                 hit.service_id,
             )
         console.print(table)
-    finally:
-        searcher.close()
 
 
 @album.command("download")
@@ -101,12 +99,12 @@ def album_download(ctx: click.Context, album_id: int, quality: int | None, lyric
 
         backend = StreamripBackend(config)
 
-        quality_tier = quality or album.quality_tier or config.quality.default
+        quality_tier = quality if quality is not None else (album.quality_tier if album.quality_tier is not None else config.quality.default)
         output_dir = Path(config.core.download_path) / "tmp" / f"album_{album_id}"
         output_dir.mkdir(parents=True, exist_ok=True)
 
         service = album.service or "deezer"
-        service_id = album.service_id or ""
+        service_id = (album.service_id or "").strip()
         if not service_id:
             click.echo("Album has no service_id. Search for it first, then set service_id.")
             return
@@ -122,10 +120,14 @@ def album_download(ctx: click.Context, album_id: int, quality: int | None, lyric
                 quality=quality_tier,
                 codec=config.quality.codec or None,
             )
-        except NotImplementedError:
-            click.echo(f"Download backend for '{service}' not fully implemented yet. Using stub.")
+        except NotImplementedError as e:
+            click.echo(f"Download backend for '{service}' not fully implemented yet.")
             click.echo(f"  Would download {service}/{service_id} @ q{quality_tier}")
-            click.echo(f"  Output would be moved to library after download.")
+            logger.warning("Download not implemented for %s/%s: %s", service, service_id, e)
+            return
+        except Exception as e:
+            click.echo(f"Download failed for '{service}': {e}")
+            logger.warning("Download failed for %s/%s: %s", service, service_id, e)
             return
 
         pipeline = DownloadPipeline(config, repo)
@@ -134,52 +136,75 @@ def album_download(ctx: click.Context, album_id: int, quality: int | None, lyric
         ) if lyrics else None
 
         success_count = 0
-        for result in results:
-            if not result.success:
-                click.echo(f"  FAIL: track {result.track_info.track_number} - {result.error}")
-                continue
-            track_id = repo.add_track(
-                album_id=album.id,
-                title=result.track_info.title,
-                track_number=result.track_info.track_number,
-                disc_number=result.track_info.disc_number,
-                duration=result.track_info.duration_s,
-                artist=result.track_info.artist,
-                isrc=result.track_info.isrc,
-            )
-            dest = pipeline.process_track(
-                source=result.file_path,
-                album_id=album.id,
-                track_id=track_id,
-                album_artist=artist.name,
-                album_title=album.title,
-                year=album.year,
-                track_num=result.track_info.track_number,
-                track_artist=result.track_info.artist,
-                track_title=result.track_info.title,
-                service=service,
-                quality=quality_tier,
-            )
-            if dest:
-                success_count += 1
-                if lyricist and dest.suffix.lower() in (".flac", ".mp3"):
-                    lyricist.fetch_and_embed(
-                        str(dest),
-                        result.track_info.title,
-                        result.track_info.artist,
-                        album.title,
-                    )
+        try:
+            for result in results:
+                if not result.success:
+                    click.echo(f"  FAIL: track {result.track_info.track_number} - {result.error}")
+                    continue
+                if result.file_path is None:
+                    click.echo(f"  FAIL: track {result.track_info.track_number} - no file path")
+                    continue
 
+                existing_tracks = repo.list_tracks(album.id)
+                track_exists = any(
+                    t.track_number == result.track_info.track_number
+                    and t.disc_number == (result.track_info.disc_number or 1)
+                    for t in existing_tracks
+                )
+                if track_exists:
+                    click.echo(f"  SKIP: track {result.track_info.track_number} already exists")
+                    continue
+
+                track_id = repo.add_track(
+                    album_id=album.id,
+                    title=result.track_info.title,
+                    track_number=result.track_info.track_number,
+                    disc_number=result.track_info.disc_number,
+                    duration=result.track_info.duration_s,
+                    artist=result.track_info.artist,
+                    isrc=result.track_info.isrc,
+                )
+                dest = pipeline.process_track(
+                    source=result.file_path,
+                    album_id=album.id,
+                    track_id=track_id,
+                    album_artist=artist.name,
+                    album_title=album.title,
+                    year=album.year,
+                    track_num=result.track_info.track_number,
+                    track_artist=result.track_info.artist,
+                    track_title=result.track_info.title,
+                    service=service,
+                    quality=quality_tier,
+                )
+                if dest:
+                    success_count += 1
+                    if lyricist and dest.suffix.lower() in (".flac", ".mp3", ".m4a", ".ogg", ".opus"):
+                        lyricist.fetch_and_embed(
+                            str(dest),
+                            result.track_info.title,
+                            result.track_info.artist,
+                            album.title,
+                        )
+        finally:
+            if lyricist:
+                lyricist.close()
+
+        if len(results) == 0:
+            status = "failed"
+        elif success_count == len(results):
+            status = "complete"
+        else:
+            status = "partial"
         repo.update_album_status(
             album.id,
-            "complete" if success_count == len(results) else "partial",
+            status,
             quality_tier=quality_tier,
         )
 
         click.echo(f"Downloaded {success_count}/{len(results)} tracks.")
 
-        if lyricist:
-            lyricist.close()
+        shutil.rmtree(output_dir, ignore_errors=True)
 
 
 @album.command("fetch")
@@ -193,45 +218,50 @@ def album_fetch(ctx: click.Context, query: str, service: str, quality: int | Non
     config = ctx.obj["config"]
     repo = Repository(config.core.library_db)
 
-    searcher = Searcher()
-    try:
+    with Searcher() as searcher:
         results = searcher.search_album(query, service=service)
+
+    try:
+        if not results:
+            click.echo("No results found.")
+            return
+
+        hit = results[0]
+        click.echo(f"Found: {hit.artist} - {hit.title} ({hit.year or '????'}) [{hit.service}]")
+
+        artist = repo.get_artist_by_name(hit.artist)
+        if not artist:
+            aid = repo.add_artist(name=hit.artist, is_monitored=False)
+            artist = repo.get_artist(aid)
+        if not artist:
+            click.echo("Failed to create artist.")
+            return
+        click.echo(f"Artist: '{artist.name}' (id={artist.id})")
+
+        album_id = None
+        # TODO: album_exists does exact title+year match; may miss variant titles or re-releases
+        if repo.album_exists(artist.id, hit.title, hit.year):
+            for a in repo.list_albums(artist_id=artist.id):
+                if a.title.lower() == hit.title.lower():
+                    album_id = a.id
+                    click.echo(f"Album already exists (id={album_id})")
+                    break
+
+        if album_id is None:
+            alid = repo.add_album(
+                artist_id=artist.id,
+                title=hit.title,
+                year=hit.year,
+                album_type=getattr(hit, 'hit_type', None) or "album",
+                service=hit.service,
+                service_id=hit.service_id,
+            )
+            if alid is None or alid == -1:
+                click.echo("Failed to add album to library.")
+                return
+            album_id = alid
+            click.echo(f"Added album '{hit.title}' (id={album_id})")
+
+        ctx.invoke(album_download, album_id=album_id, quality=quality, lyrics=lyrics)
     finally:
-        searcher.close()
-
-    if not results:
-        click.echo("No results found.")
-        return
-
-    hit = results[0]
-    click.echo(f"Found: {hit.artist} - {hit.title} ({hit.year or '????'}) [{hit.service}]")
-
-    artist = repo.get_artist_by_name(hit.artist)
-    if not artist:
-        aid = repo.add_artist(name=hit.artist, is_monitored=False)
-        artist = repo.get_artist(aid)
-    if not artist:
-        click.echo("Failed to create artist.")
-        return
-    click.echo(f"Artist: '{artist.name}' (id={artist.id})")
-
-    album_id = None
-    for a in repo.list_albums(artist_id=artist.id):
-        if a.title.lower() == hit.title.lower():
-            album_id = a.id
-            click.echo(f"Album already exists (id={album_id})")
-            break
-
-    if album_id is None:
-        alid = repo.add_album(
-            artist_id=artist.id,
-            title=hit.title,
-            year=hit.year,
-            album_type="album",
-            service=hit.service,
-            service_id=hit.service_id,
-        )
-        album_id = alid
-        click.echo(f"Added album '{hit.title}' (id={album_id})")
-
-    ctx.invoke(album_download, album_id=album_id, quality=quality, lyrics=lyrics)
+        repo.close()

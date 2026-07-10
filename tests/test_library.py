@@ -15,7 +15,8 @@ def repo(tmp_path):
     ensure_schema(db)
     r = Repository(db)
     r.connect()
-    return r
+    yield r
+    r.close()
 
 
 def _make_flac(path: Path, tags: dict | None = None) -> str:
@@ -54,6 +55,11 @@ def test_scan_imports_new_file(repo, tmp_path):
     assert artists[0].name == "Test Artist"
     albums = repo.list_albums(artist_id=artists[0].id)
     assert len(albums) == 1
+    assert albums[0].title == "Test Album"
+    assert albums[0].year == 2020
+    tracks = repo.list_tracks(albums[0].id)
+    assert len(tracks) == 1
+    assert tracks[0].title == "Test Song"
 
 
 def test_scan_matches_existing_track(repo, tmp_path):
@@ -81,9 +87,9 @@ def test_scan_skips_non_audio(repo, tmp_path):
     assert stats["scanned"] == 0
 
 
-def test_scan_nonexistent_directory(repo):
+def test_scan_nonexistent_directory(repo, tmp_path):
     scanner = LibraryScanner(repo)
-    stats = scanner.scan_directory("/nonexistent/path/xyz")
+    stats = scanner.scan_directory(str(tmp_path / "nonexistent"))
     assert stats["scanned"] == 0
     assert stats["errors"] == 0
 
@@ -113,7 +119,8 @@ def test_scan_missing_tags_skipped(repo, tmp_path):
     scanner = LibraryScanner(repo)
     stats = scanner.scan_directory(str(music))
     assert stats["scanned"] == 1
-    assert "imported" in stats
+    assert stats["imported"] == 0
+    assert stats["errors"] == 0
 
 
 def test_prune_marks_missing(repo, tmp_path):

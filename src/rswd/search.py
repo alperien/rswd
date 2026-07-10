@@ -28,12 +28,15 @@ class Searcher:
     def __init__(self, timeout: float = 15.0):
         self._client = httpx.Client(timeout=timeout)
 
+    def __enter__(self) -> Searcher:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
+
     def search_album(self, query: str, service: str = "deezer") -> list[SearchHit]:
-        if service == "deezer":
-            return self._search_deezer_album(query)
-        elif service == "tidal":
-            logger.info("Tidal search not yet implemented, falling back to Deezer")
-            return self._search_deezer_album(query)
+        if service != "deezer":
+            logger.info("Service %r not yet implemented, falling back to Deezer", service)
         return self._search_deezer_album(query)
 
     def _search_deezer_album(self, query: str) -> list[SearchHit]:
@@ -46,26 +49,29 @@ class Searcher:
                 year = None
                 release_date = item.get("release_date", "")
                 if release_date and len(release_date) >= 4:
-                    year = int(release_date[:4])
+                    try:
+                        year = int(release_date[:4])
+                    except (ValueError, TypeError):
+                        year = None
                 hits.append(SearchHit(
                     service="deezer",
-                    service_id=str(item["id"]),
-                    title=item["title"],
-                    artist=item["artist"]["name"],
-                    album=item["title"],
+                    service_id=str(item.get("id", "")),
+                    title=item.get("title", "Unknown"),
+                    artist=item.get("artist", {}).get("name", "Unknown Artist"),
+                    album=item.get("title", "Unknown"),
                     year=year,
                     track_count=item.get("nb_tracks"),
                     cover_url=item.get("cover_medium") or item.get("cover"),
                     hit_type="album",
                 ))
             return hits
-        except httpx.HTTPError as e:
+        except (httpx.HTTPError, ValueError) as e:
             logger.warning("Deezer search failed: %s", e)
             return []
 
     def search_artist(self, query: str, service: str = "deezer") -> list[SearchHit]:
-        if service == "deezer":
-            return self._search_deezer_artist(query)
+        if service != "deezer":
+            logger.info("Service %r not yet implemented, falling back to Deezer", service)
         return self._search_deezer_artist(query)
 
     def _search_deezer_artist(self, query: str) -> list[SearchHit]:
@@ -77,17 +83,18 @@ class Searcher:
             for item in data.get("data", [])[:10]:
                 hits.append(SearchHit(
                     service="deezer",
-                    service_id=str(item["id"]),
-                    title=item["name"],
-                    artist=item["name"],
+                    service_id=str(item.get("id", "")),
+                    title=item.get("name", "Unknown"),
+                    artist=item.get("name", "Unknown Artist"),
                     cover_url=item.get("picture_medium") or item.get("picture"),
                     hit_type="artist",
                 ))
             return hits
-        except httpx.HTTPError as e:
+        except (httpx.HTTPError, ValueError) as e:
             logger.warning("Deezer artist search failed: %s", e)
             return []
 
+    # TODO: not yet called by any code path; retained for future integration
     def get_artist_discography(self, artist_name: str) -> list[dict]:
         """Fetch all albums for an artist from Deezer by name."""
         try:
@@ -106,16 +113,19 @@ class Searcher:
                 year = None
                 release_date = item.get("release_date", "")
                 if release_date and len(release_date) >= 4:
-                    year = int(release_date[:4])
+                    try:
+                        year = int(release_date[:4])
+                    except (ValueError, TypeError):
+                        year = None
                 albums.append({
-                    "title": item["title"],
+                    "title": item.get("title", "Unknown"),
                     "year": year,
                     "track_count": item.get("nb_tracks"),
-                    "deezer_id": str(item["id"]),
+                    "deezer_id": str(item.get("id", "")),
                     "type": item.get("record_type", "album"),
                 })
             return albums
-        except httpx.HTTPError as e:
+        except (httpx.HTTPError, ValueError) as e:
             logger.warning("Deezer discography lookup failed for %s: %s", artist_name, e)
             return []
 

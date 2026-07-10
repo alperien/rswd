@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 from click.testing import CliRunner
 
@@ -37,7 +38,9 @@ def test_daemon_status(tmp_path):
     assert "Running:" in result.output
 
 
-def test_daemon_stop_when_not_running(tmp_path):
+@patch("rswd.cli.daemon.default_data_dir")
+def test_daemon_stop_when_not_running(mock_data_dir, tmp_path):
+    mock_data_dir.return_value = tmp_path
     db = str(tmp_path / "library.db")
     ensure_schema(db)
     cfg = write_test_config(tmp_path / "config", db, str(tmp_path / "music"))

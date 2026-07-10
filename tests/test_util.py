@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 from rswd.util import (
     sanitize_filename,
     normalize_name,
@@ -22,9 +24,8 @@ def test_sanitize_removes_illegal_chars():
 
 
 def test_sanitize_strips_trailing_dots():
-    if sys.platform == "win32":
-        result = sanitize_filename("trailing...")
-        assert not result.endswith(".")
+    result = sanitize_filename("trailing...")
+    assert not result.endswith(".")
 
 
 def test_sanitize_strips_trailing_spaces():
@@ -32,18 +33,18 @@ def test_sanitize_strips_trailing_spaces():
     assert not result.endswith(" ")
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only")
 def test_sanitize_reserved_names_windows():
-    if sys.platform == "win32":
-        result = sanitize_filename("con")
-        assert result == "_con"
-        result = sanitize_filename("NUL")
-        assert result == "_NUL"
+    result = sanitize_filename("con")
+    assert result == "_con"
+    result = sanitize_filename("NUL")
+    assert result == "_NUL"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Non-Windows")
 def test_sanitize_reserved_names_not_windows():
     result = sanitize_filename("con")
-    if sys.platform != "win32":
-        assert result != "_con"
+    assert result == "con"
 
 
 def test_sanitize_truncates_long_names():
@@ -55,7 +56,7 @@ def test_sanitize_truncates_long_names():
 def test_sanitize_keeps_extension_when_truncating():
     name = "a" * 200 + ".flac"
     result = sanitize_filename(name, max_len=50)
-    assert result.endswith(".flac") or len(result) <= 200
+    assert result.endswith(".flac")
 
 
 def test_normalize_name_nfc():
@@ -81,19 +82,21 @@ def test_paths_match_unicode():
 
 
 def test_validate_path_length_returns_path():
-    p = validate_path_length(Path("C:\\test\\path"))
+    p = validate_path_length(Path("test_path"))
     assert isinstance(p, Path)
 
 
 def test_validate_path_length_raises_on_extreme():
     long_path = Path("a" * 33000)
-    try:
+    with pytest.raises((OSError, ValueError)):
         validate_path_length(long_path)
-        assert False
-    except (OSError, ValueError):
-        pass
 
 
 def test_platform_label():
     label = platform_label()
-    assert label in ("windows", "linux", "macos")
+    if sys.platform == "win32":
+        assert label == "windows"
+    elif sys.platform == "darwin":
+        assert label == "macos"
+    else:
+        assert label == "linux"

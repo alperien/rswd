@@ -7,11 +7,12 @@ from rswd.db.schema import ensure_schema
 
 
 @pytest.fixture
-def repo(tmp_path):
+def repo(tmp_path, request):
     db = str(tmp_path / "test.db")
     ensure_schema(db)
     r = Repository(db)
     r.connect()
+    request.addfinalizer(r.close)
     return r
 
 

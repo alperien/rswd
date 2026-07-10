@@ -29,8 +29,9 @@ def test_foreign_keys_enabled(tmp_path):
     db = str(tmp_path / "test.db")
     ensure_schema(db)
     conn = sqlite3.connect(db)
-    conn.execute("PRAGMA foreign_keys=ON")
-    assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    conn.execute("PRAGMA foreign_keys = ON")
+    fk_enabled = conn.execute("PRAGMA foreign_keys").fetchone()[0]
+    assert fk_enabled == 1
     conn.close()
 
 

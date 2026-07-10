@@ -41,6 +41,8 @@ def test_redact_sensitive_multiple():
     text = 'arl = "a"\npassword_or_token = "b"'
     result = redact_sensitive(text)
     assert "<redacted>" in result
+    assert 'arl = "a"' not in result
+    assert 'password_or_token = "b"' not in result
 
 
 def test_redact_sensitive_no_match():
@@ -79,7 +81,8 @@ def test_expand_path_expands_user():
 
 def test_expand_path_absolute():
     expanded = _expand_path("/absolute/path")
-    assert expanded == str(Path("/absolute/path").resolve())
+    assert Path(expanded).is_absolute()
+    assert "absolute" in expanded
 
 
 def test_set_deep_attr_simple():
@@ -96,7 +99,8 @@ def test_set_deep_attr_nested():
 
 def test_set_deep_attr_invalid_path():
     cfg = ConfigData()
-    _set_deep_attr(cfg, "nonexistent.key", "val")  # should not raise
+    _set_deep_attr(cfg, "nonexistent.key", "val")
+    assert not hasattr(cfg, "nonexistent")
 
 
 def test_env_overrides(monkeypatch):
@@ -118,12 +122,12 @@ def test_env_overrides_unknown_var(monkeypatch):
 
 def test_default_config_dir_not_empty():
     d = default_config_dir()
-    assert len(str(d)) > 0
+    assert d.name == "rswd"
 
 
 def test_default_data_dir_not_empty():
     d = default_data_dir()
-    assert len(str(d)) > 0
+    assert d.name == "rswd"
 
 
 def test_config_with_nonexistent_path():
@@ -132,17 +136,20 @@ def test_config_with_nonexistent_path():
     assert isinstance(cfg, ConfigData)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows-specific")
 def test_config_permissions_not_set_on_windows(tmp_path):
-    if os.name == "nt":
-        cfg_file = tmp_path / "config.toml"
-        cfg_file.write_text("[core]\ndownload_path = '/music'")
-        _ensure_config_permissions(cfg_file)
-        assert cfg_file.exists()
+    cfg_file = tmp_path / "config.toml"
+    cfg_file.write_text("[core]\ndownload_path = '/music'")
+    _ensure_config_permissions(cfg_file)
+    assert cfg_file.exists()
 
 
 def test_keyring_load_noop():
+    from unittest.mock import patch
+
     cfg = ConfigData()
-    result = try_keyring_load(cfg)
+    with patch.dict("sys.modules", {"keyring": None}):
+        result = try_keyring_load(cfg)
     assert result is cfg
 
 

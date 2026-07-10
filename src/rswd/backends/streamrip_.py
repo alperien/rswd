@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+import copy
 import logging
+import re
 from pathlib import Path
 from typing import Optional
 
+import httpx
 from streamrip import Config as RpConfig  # type: ignore[import-untyped]
 from streamrip.config import BLANK_CONFIG_PATH  # type: ignore[import-untyped]
 
@@ -58,7 +62,11 @@ class StreamripBackend(SearchDownloadBackend):
         }
 
     def _build_rp_config(self, cfg: dict) -> RpConfig:
-        rp = RpConfig(BLANK_CONFIG_PATH)
+        try:
+            rp = RpConfig(BLANK_CONFIG_PATH)
+        except FileNotFoundError:
+            logger.error("Streamrip config file not found: %s", BLANK_CONFIG_PATH)
+            raise
         rp.session.downloads.folder = cfg.get("download_path", "~/music")
         codec = cfg.get("codec")
         rp.session.conversion.enabled = bool(codec)
@@ -96,21 +104,30 @@ class StreamripBackend(SearchDownloadBackend):
     def _scan_output(self, output_dir: Path, album_info: AlbumInfo) -> list[DownloadResult]:
         results: list[DownloadResult] = []
         for track in album_info.tracks:
-            candidates = list(output_dir.rglob(f"*{track.service_id}*"))
-            if not candidates:
-                candidates = list(output_dir.rglob(f"*{track.track_number:02d}*"))
-            if not candidates:
-                candidates = list(output_dir.glob(f"*.flac")) or list(output_dir.glob(f"*.mp3"))
-            if candidates:
+            file_path = None
+            service_id_re = re.compile(
+                r'(?:^|[^0-9])' + re.escape(track.service_id) + r'(?:[^0-9]|$)'
+            )
+            for f in output_dir.rglob("*"):
+                if f.is_file() and service_id_re.search(f.name):
+                    file_path = f
+                    break
+            if file_path is None:
+                for ext in [".flac", ".mp3", ".ogg", ".m4a", ".opus", ".wav"]:
+                    candidates = list(output_dir.rglob(f"*{track.track_number:02d}*{ext}"))
+                    if candidates:
+                        file_path = candidates[0]
+                        break
+            if file_path is not None:
                 results.append(DownloadResult(
                     track_info=track,
-                    file_path=candidates[0],
+                    file_path=file_path,
                     success=True,
                 ))
             else:
                 results.append(DownloadResult(
                     track_info=track,
-                    file_path=output_dir,
+                    file_path=None,
                     success=False,
                     error=f"File not found for track {track.track_number}",
                 ))
@@ -120,10 +137,14 @@ class StreamripBackend(SearchDownloadBackend):
         logger.info("Searching for %s: '%s'", media_type, query)
         if self._searcher is None:
             self._searcher = Searcher()
-        if media_type == "artist":
-            hits = self._searcher.search_artist(query)
-        else:
-            hits = self._searcher.search_album(query)
+        try:
+            if media_type == "artist":
+                hits = self._searcher.search_artist(query)
+            else:
+                hits = self._searcher.search_album(query)
+        except Exception as e:
+            logger.error("Search failed for %s '%s': %s", media_type, query, e)
+            raise
         results: list[SearchResult] = []
         for hit in hits[:limit]:
             results.append(SearchResult(
@@ -142,12 +163,18 @@ class StreamripBackend(SearchDownloadBackend):
         logger.info("Fetching discography for '%s'", artist_name)
         if self._searcher is None:
             self._searcher = Searcher()
-        hits = self._searcher.search_album(artist_name)
-        albums: dict[str, list[AlbumInfo]] = {}
+        artist_results = self._searcher.search_artist(artist_name)
+        if artist_results:
+            artist_hit = artist_results[0]
+            hits = self._searcher.search_album(artist_hit.artist)
+            matched_name = artist_hit.artist.lower()
+            hits = [h for h in hits if h.artist.lower() == matched_name]
+        else:
+            hits = self._searcher.search_album(artist_name)
+        albums: list[AlbumInfo] = []
         for hit in hits:
-            albums.setdefault("albums", [])
-            if hit.track_count:
-                albums["albums"].append(AlbumInfo(
+            if hit.track_count is not None:
+                albums.append(AlbumInfo(
                     service=hit.service,
                     service_id=hit.service_id,
                     title=hit.title,
@@ -155,47 +182,46 @@ class StreamripBackend(SearchDownloadBackend):
                     year=hit.year,
                     total_tracks=hit.track_count,
                 ))
-        return albums
+        return {"albums": albums}
 
     def get_album_info(self, service: str, service_id: str) -> AlbumInfo:
         logger.info("Fetching album info for %s/%s", service, service_id)
-        try:
-            import httpx
-            if service == "deezer":
-                resp = httpx.get(f"https://api.deezer.com/album/{service_id}", timeout=10)
-                resp.raise_for_status()
-                data = resp.json()
-                tracks = []
-                for i, t in enumerate(data.get("tracks", {}).get("data", []), 1):
-                    tracks.append(TrackInfo(
-                        service="deezer",
-                        service_id=str(t["id"]),
-                        title=t["title"],
-                        artist=t["artist"]["name"],
-                        album=data["title"],
-                        album_id=service_id,
-                        track_number=i,
-                        duration_s=t.get("duration"),
-                    ))
-                year = None
-                release_date = data.get("release_date", "")
-                if release_date and len(release_date) >= 4:
-                    year = int(release_date[:4])
-                return AlbumInfo(
+        if service == "deezer":
+            resp = httpx.get(f"https://api.deezer.com/album/{service_id}", timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            tracks = []
+            for i, t in enumerate(data.get("tracks", {}).get("data", []), 1):
+                tracks.append(TrackInfo(
                     service="deezer",
-                    service_id=service_id,
-                    title=data["title"],
-                    artist=data["artist"]["name"],
-                    year=year,
-                    tracks=tuple(tracks),
-                    cover_url=data.get("cover_medium") or data.get("cover"),
-                    label=data.get("label"),
-                    total_tracks=data.get("nb_tracks"),
-                    explicit=data.get("explicit_lyrics", False),
-                )
-        except Exception as e:
-            logger.warning("Failed to get album info for %s/%s: %s", service, service_id, e)
-        raise NotImplementedError(f"get_album_info not implemented for {service}/{service_id}")
+                    service_id=str(t["id"]),
+                    title=t["title"],
+                    artist=t["artist"]["name"],
+                    album=data["title"],
+                    album_id=service_id,
+                    track_number=t.get("track_position", i),
+                    duration_s=t.get("duration"),
+                ))
+            year = None
+            release_date = data.get("release_date", "")
+            if release_date and len(release_date) >= 4:
+                try:
+                    year = int(release_date[:4])
+                except ValueError:
+                    logger.warning("Invalid release date format: %s", release_date)
+            return AlbumInfo(
+                service="deezer",
+                service_id=service_id,
+                title=data["title"],
+                artist=data["artist"]["name"],
+                year=year,
+                tracks=tuple(tracks),
+                cover_url=data.get("cover_medium") or data.get("cover"),
+                label=data.get("label"),
+                total_tracks=data.get("nb_tracks"),
+                explicit=data.get("explicit_lyrics", False),
+            )
+        raise NotImplementedError(f"get_album_info not implemented for service {service!r}")
 
     def download_album(
         self,
@@ -206,10 +232,11 @@ class StreamripBackend(SearchDownloadBackend):
         quality: int = 2,
         codec: Optional[str] = None,
     ) -> list[DownloadResult]:
+        # TODO: download_album blocks the thread; consider async refactor
         logger.info("Downloading %s/%s to %s (quality=%d)", service, service_id, output_dir, quality)
 
         async def _download():
-            config = self._get_rp_config()
+            config = copy.deepcopy(self._get_rp_config())
             config.session.downloads.folder = str(output_dir)
             from streamrip.rip.main import Main  # type: ignore[import-untyped]
             try:
@@ -222,9 +249,20 @@ class StreamripBackend(SearchDownloadBackend):
                     logger.error("Download failed: Deezer ARL is missing or invalid. Set RSWD_DEEZER_ARL env var or configure via web UI at /config.")
                 else:
                     logger.exception("streamrip download failed: %s", e)
+                raise
             return self._scan_output(output_dir, album_info)
 
-        return asyncio.run(_download())
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                results = pool.submit(asyncio.run, _download()).result(timeout=300)
+        else:
+            results = asyncio.run(_download())
+        return results
 
     def login_and_validate(self) -> dict[str, bool]:
         return {}

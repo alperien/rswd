@@ -7,18 +7,7 @@ from click.testing import CliRunner
 
 from rswd.__main__ import cli
 from rswd.db.schema import ensure_schema
-
-
-def write_test_config(config_dir: Path, db_path: str, download_path: str):
-    config_dir.mkdir(parents=True, exist_ok=True)
-    lines = [
-        "[core]",
-        f'download_path = "{download_path.replace(os.sep, "/")}"',
-        f'library_db = "{db_path.replace(os.sep, "/")}"',
-        f'jobs_db = "{str(Path(db_path).parent / "jobs.db").replace(os.sep, "/")}"',
-    ]
-    (config_dir / "config.toml").write_text("\n".join(lines))
-    return str(config_dir / "config.toml")
+from tests.conftest import write_test_config
 
 
 def test_library_status_empty(tmp_path):
@@ -76,7 +65,7 @@ def test_library_import_dry_run(tmp_path):
     runner = CliRunner()
     result = runner.invoke(cli, ["--config", cfg, "library", "import", str(music), "--dry-run"])
     assert result.exit_code == 0
-    assert "dry-run" in result.output.lower() or "Would" in result.output
+    assert "Dry-run scan of" in result.output
 
 
 def test_library_import_imports_files(tmp_path):

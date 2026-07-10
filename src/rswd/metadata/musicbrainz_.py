@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import time
 from typing import Optional
 
 try:
@@ -23,8 +22,7 @@ class MusicBrainzEnricher:
                 "0.1.0",
                 contact="user@example.com",
             )
-            musicbrainzngs.set_rate_limit(rate_limit or 1.0)
-        self._rate_limit = rate_limit
+            musicbrainzngs.set_rate_limit(rate_limit if rate_limit and rate_limit > 0 else 1.0)
 
     def _available(self) -> bool:
         return musicbrainzngs is not None
@@ -38,7 +36,7 @@ class MusicBrainzEnricher:
             if result.get("artist-list"):
                 return result["artist-list"][0]
             return None
-        except Exception as e:
+        except musicbrainzngs.MusicBrainzError as e:
             logger.warning("MusicBrainz artist search failed for '%s': %s", artist_name, e)
             return None
 
@@ -54,7 +52,7 @@ class MusicBrainzEnricher:
             if result.get("release-list"):
                 return result["release-list"][0]
             return None
-        except Exception as e:
+        except musicbrainzngs.MusicBrainzError as e:
             logger.warning("MusicBrainz release search failed for '%s': %s", album_title, e)
             return None
 
@@ -70,7 +68,7 @@ class MusicBrainzEnricher:
             if result.get("recording-list"):
                 return result["recording-list"][0]
             return None
-        except Exception as e:
+        except musicbrainzngs.MusicBrainzError as e:
             logger.warning("MusicBrainz recording search failed for '%s': %s", recording, e)
             return None
 
@@ -106,8 +104,7 @@ class MusicBrainzEnricher:
         mbid = mb_data.get("id")
         rgid = None
         release_group = mb_data.get("release-group", {})
-        if release_group:
-            rgid = release_group.get("id")
+        rgid = release_group.get("id")
         if mbid:
             conn = repo.connect()
             conn.execute(

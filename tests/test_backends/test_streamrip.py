@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("streamrip")
+
 from rswd.backends.streamrip_ import StreamripBackend
 from rswd.config import ConfigData
 

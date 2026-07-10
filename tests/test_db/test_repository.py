@@ -5,11 +5,12 @@ from rswd.db.schema import ensure_schema
 
 
 @pytest.fixture
-def repo(tmp_path):
+def repo(tmp_path, request):
     db = str(tmp_path / "test.db")
     ensure_schema(db)
     r = Repository(db)
     r.connect()
+    request.addfinalizer(r.close)
     return r
 
 
@@ -31,7 +32,7 @@ class TestArtists:
         repo.add_artist("Beta", is_monitored=True)
         repo.add_artist("Gamma")
         all_artists = repo.list_artists()
-        assert len(all_artists) >= 3
+        assert len(all_artists) == 3
         monitored = repo.list_artists(monitored_only=True)
         assert len(monitored) == 1
         assert monitored[0].name == "Beta"

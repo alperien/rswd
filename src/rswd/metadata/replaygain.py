@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import re
 import subprocess
@@ -12,13 +11,11 @@ import mutagen
 logger = logging.getLogger("rswd.metadata.replaygain")
 
 
-
-
 class ReplayGainScanner:
     def __init__(self, ffmpeg_path: str = "ffmpeg"):
         self._ffmpeg = ffmpeg_path
 
-    def _parse_ebur128_output(self, text: str) -> dict[str, float]:
+    def _parse_ebur128_output(self, text: str) -> dict[str, float | None]:
         integrated = None
         peak = None
         for line in text.splitlines():
@@ -29,14 +26,17 @@ class ReplayGainScanner:
             m = re.match(r"Peak:\s+([-\d.]+)\s+dBFS", line)
             if m:
                 peak = float(m.group(1))
-        return {"track_gain": integrated, "track_peak": peak}  # type: ignore[dict-item]
+        return {"track_gain": integrated, "track_peak": peak}
 
-    def scan_file(self, file_path: str) -> Optional[dict[str, float]]:
+    def scan_file(self, file_path: str) -> Optional[dict[str, float | None]]:
         try:
             result = subprocess.run(
                 [self._ffmpeg, "-i", file_path, "-af", "ebur128", "-f", "null", "-"],
                 capture_output=True, text=True, timeout=120,
             )
+            if result.returncode != 0:
+                logger.warning("ffmpeg exited with code %d for %s", result.returncode, file_path)
+                return None
             return self._parse_ebur128_output(result.stderr)
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
             logger.warning("ReplayGain scan failed for %s: %s", file_path, e)
@@ -63,9 +63,11 @@ class ReplayGainScanner:
                 tags["REPLAYGAIN_TRACK_GAIN"] = f"{gain:.2f} dB"
                 tags["REPLAYGAIN_TRACK_PEAK"] = f"{peak:.6f}"
             audio.save()
+            if hasattr(audio, "close"):
+                audio.close()
             logger.info("Wrote ReplayGain tags to %s", file_path)
             return True
-        except Exception as e:
+        except (mutagen.MutagenError, OSError) as e:
             logger.warning("Failed to write ReplayGain tags to %s: %s", file_path, e)
             return False
 
@@ -73,4 +75,4 @@ class ReplayGainScanner:
         rg = self.scan_file(file_path)
         if rg is None or rg["track_gain"] is None:
             return False
-        return self.write_track_gain(file_path, rg["track_gain"], rg["track_peak"] or 0.0)
+        return self.write_track_gain(file_path, rg["track_gain"], rg["track_peak"] if rg["track_peak"] is not None else 0.0)

@@ -5,6 +5,7 @@ import os
 import signal
 import sys
 import time
+import datetime
 from pathlib import Path
 
 import click
@@ -14,10 +15,6 @@ from rswd.db.repository import Repository
 from rswd.log import setup_logging
 
 logger = logging.getLogger("rswd.cli.daemon")
-
-
-def _lock_path() -> Path:
-    return default_data_dir() / "daemon.lock"
 
 
 def _pid_path() -> Path:
@@ -44,15 +41,9 @@ def _is_running() -> bool:
         return False
 
 
-def _write_pid():
-    _pid_path().parent.mkdir(parents=True, exist_ok=True)
-    _pid_path().write_text(str(os.getpid()))
-
-
 def _cleanup_pid():
     try:
         _pid_path().unlink(missing_ok=True)
-        _lock_path().unlink(missing_ok=True)
     except Exception:
         pass
 
@@ -61,10 +52,13 @@ def _check_monitored_artists(repo: Repository) -> dict:
     from rswd.search import Searcher
 
     artists = repo.list_artists(monitored_only=True)
-    log_conn = repo.connect()
+    # Intentionally uses a separate connection for the scheduler log to avoid
+    # interfering with the main repository transaction scope.
+    import sqlite3
+    log_conn = sqlite3.connect(repo.db_path)
     log_conn.execute(
         "INSERT INTO scheduler_log (job_name, started_at, status) VALUES (?, ?, ?)",
-        ("check_new_releases", time.strftime("%Y-%m-%dT%H:%M:%SZ"), "running"),
+        ("check_new_releases", datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "running"),
     )
     log_id = log_conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
@@ -75,6 +69,8 @@ def _check_monitored_artists(repo: Repository) -> dict:
         for artist in artists:
             try:
                 results["artists_checked"] += 1
+                # TODO: use artist discography lookup instead of generic search_album
+                # to find all releases by this specific artist
                 hits = searcher.search_album(artist.name)
                 for hit in hits:
                     if not repo.album_exists(artist.id, hit.title, hit.year):
@@ -100,7 +96,7 @@ def _check_monitored_artists(repo: Repository) -> dict:
         """UPDATE scheduler_log SET completed_at = ?, status = ?, message = ?,
            albums_found = ? WHERE id = ?""",
         (
-            time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "completed",
             f"Checked {results['artists_checked']} artists, found {results['albums_found']} new",
             results["albums_found"],
@@ -108,6 +104,7 @@ def _check_monitored_artists(repo: Repository) -> dict:
         ),
     )
     log_conn.commit()
+    log_conn.close()
 
     return results
 
@@ -123,6 +120,9 @@ def daemon():
 def daemon_start(ctx: click.Context, foreground: bool):
     """Start the monitoring daemon."""
     config = ctx.obj["config"]
+
+    if sys.platform != "win32":
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 
     if _is_running():
         click.echo("Daemon is already running.")
@@ -140,10 +140,34 @@ def daemon_start(ctx: click.Context, foreground: bool):
             click.echo("Foreground mode required on Windows. Use --foreground.")
             return
 
-    _write_pid()
-    log_dir = default_config_dir() / "log"
-    setup_logging(log_dir, daemon_mode=True)
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+            # Note: msvcrt.locking only locks the first n bytes; locking 1 byte
+            # is sufficient here as a mutex guard for the PID file.
+            pid_fd = os.open(str(_pid_path()), os.O_RDWR | os.O_CREAT | os.O_EXCL)
+        else:
+            import fcntl
+            pid_fd = os.open(str(_pid_path()), os.O_RDWR | os.O_CREAT | os.O_EXCL)
+        try:
+            if sys.platform == "win32":
+                msvcrt.locking(pid_fd, msvcrt.LK_NBLCK, 1)
+            else:
+                fcntl.flock(pid_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            os.write(pid_fd, str(os.getpid()).encode())
+        except (OSError, PermissionError):
+            os.close(pid_fd)
+            click.echo("Daemon is already running.")
+            return
+        os.close(pid_fd)
+    except FileExistsError:
+        click.echo("Daemon is already running.")
+        return
 
+    log_dir = default_config_dir() / "log"
+    setup_logging(log_dir, level=config.core.log_level, daemon_mode=True)
+
+    repo = None
     try:
         from apscheduler.schedulers.background import BackgroundScheduler  # type: ignore[import-untyped]
 
@@ -168,9 +192,11 @@ def daemon_start(ctx: click.Context, foreground: bool):
         try:
             while True:
                 time.sleep(60)
-        except KeyboardInterrupt:
-            scheduler.shutdown()
+        except (KeyboardInterrupt, SystemExit):
+            scheduler.shutdown(wait=True)
     finally:
+        if repo is not None:
+            repo.close()
         _cleanup_pid()
 
 
@@ -190,6 +216,11 @@ def daemon_stop():
             if handle:
                 ctypes.windll.kernel32.TerminateProcess(handle, 0)
                 ctypes.windll.kernel32.CloseHandle(handle)
+                time.sleep(0.5)
+            else:
+                click.echo(f"PID {pid} is not running.")
+                _cleanup_pid()
+                return
         else:
             os.kill(pid, signal.SIGTERM)
         _cleanup_pid()

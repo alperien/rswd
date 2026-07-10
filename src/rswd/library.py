@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 from pathlib import Path
 from typing import Optional
 
@@ -11,6 +12,17 @@ from rswd.db.repository import Repository
 logger = logging.getLogger("rswd.library")
 
 AUDIO_EXTENSIONS = {".flac", ".mp3", ".m4a", ".ogg", ".opus", ".wav", ".aiff", ".wma"}
+
+_TAG_MAP = {
+    "title": ("title", "TITLE", "TIT2"),
+    "artist": ("artist", "ARTIST", "TPE1"),
+    "album": ("album", "ALBUM", "TALB"),
+    "albumartist": ("albumartist", "ALBUMARTIST", "TPE2"),
+    "date": ("date", "DATE", "TDRC", "TDOR"),
+    "track": ("track", "TRACK", "TRCK"),
+    "disc": ("disc", "DISC", "TPOS"),
+    "genre": ("genre", "GENRE", "TCON"),
+}
 
 
 class LibraryScanner:
@@ -24,7 +36,9 @@ class LibraryScanner:
             logger.error("Scan directory not found: %s", directory)
             return stats
 
-        for path in root.rglob("*"):
+        # Note: rglob("*") materializes all paths into memory; large directory trees may cause high memory usage.
+        entries = list(root.rglob("*"))
+        for path in entries:
             if path.suffix.lower() not in AUDIO_EXTENSIONS:
                 continue
             stats["scanned"] += 1
@@ -34,9 +48,11 @@ class LibraryScanner:
                     stats["matched"] += 1
                 elif result == "imported":
                     stats["imported"] += 1
+                elif result == "skipped":
+                    pass
                 else:
                     stats["errors"] += 1
-            except Exception as e:
+            except (OSError, sqlite3.Error) as e:
                 logger.error("Error processing %s: %s", path, e)
                 stats["errors"] += 1
 
@@ -52,7 +68,7 @@ class LibraryScanner:
             audio = mutagen.File(str_path)
             if audio is None:
                 return "skipped"
-        except mutagen.MutagenError:
+        except (mutagen.MutagenError, OSError):
             return "skipped"
 
         tags = audio.tags or {}
@@ -65,8 +81,9 @@ class LibraryScanner:
         if not title or not artist or not album_title:
             return "skipped"
 
-        if album_artist is None:
-            return "skipped"
+        if not isinstance(album_artist, str):
+            raise TypeError(f"album_artist must be str, got {type(album_artist)}")
+
         db_artist = self.repo.get_artist_by_name(album_artist)
         if not db_artist:
             aid = self.repo.add_artist(
@@ -84,7 +101,9 @@ class LibraryScanner:
                 db_album = a
                 break
 
-        year = self._tag_int(tags, "date") or self._tag_int(tags, "year")
+        year = self._tag_int(tags, "date")
+        if year is None:
+            year = self._tag_int(tags, "year")
         if not db_album:
             alid = self.repo.add_album(
                 artist_id=db_artist.id,
@@ -97,16 +116,17 @@ class LibraryScanner:
             if db_album is None:
                 return "skipped"
 
+        disc_int = self._tag_int(tags, "discnumber")
         tid = self.repo.add_track(
             album_id=db_album.id,
             title=title,
             track_number=track_number,
-            disc_number=self._tag_int(tags, "discnumber") or 1,
+            disc_number=disc_int if disc_int is not None else 1,
             duration=self._get_duration(audio),
             artist=artist,
         )
 
-        info = audio.info if audio else None
+        info = audio.info
         self.repo.update_track_file(
             track_id=tid,
             file_path=str_path,
@@ -119,31 +139,81 @@ class LibraryScanner:
         logger.info("Imported %s -> track %d", path, tid)
         return "imported"
 
+    def preview_directory(self, directory: str) -> dict[str, int]:
+        stats: dict[str, int] = {"scanned": 0, "matched": 0, "imported": 0, "errors": 0}
+        root = Path(directory)
+        if not root.is_dir():
+            logger.error("Preview directory not found: %s", directory)
+            return stats
+
+        entries = list(root.rglob("*"))
+        for path in entries:
+            if path.suffix.lower() not in AUDIO_EXTENSIONS:
+                continue
+            stats["scanned"] += 1
+            try:
+                existing = self.repo.get_track_by_path(str(path))
+                if existing:
+                    stats["matched"] += 1
+                    continue
+                audio = mutagen.File(str(path))
+                if audio is None:
+                    continue
+                tags = audio.tags or {}
+                title = self._tag_value(tags, "title")
+                artist = self._tag_value(tags, "artist")
+                album_title = self._tag_value(tags, "album")
+                if title and artist and album_title:
+                    stats["imported"] += 1
+                else:
+                    stats["errors"] += 1
+            except Exception as e:
+                logger.error("Error previewing %s: %s", path, e)
+                stats["errors"] += 1
+
+        return stats
+
     def prune_missing(self) -> int:
         conn = self.repo.connect()
-        rows = conn.execute(
+        cursor = conn.execute(
             "SELECT id, file_path FROM tracks WHERE file_path IS NOT NULL"
-        ).fetchall()
+        )
         removed = 0
-        for row in rows:
-            if not Path(row["file_path"]).is_file():
-                conn.execute(
-                    "UPDATE tracks SET file_path = NULL, download_status = 'missing' WHERE id = ?",
-                    (row["id"],),
-                )
-                removed += 1
-        conn.commit()
+        while True:
+            rows = cursor.fetchmany(100)
+            if not rows:
+                break
+            for row in rows:
+                try:
+                    if not Path(row["file_path"]).is_file():
+                        conn.execute(
+                            "UPDATE tracks SET file_path = NULL, download_status = 'missing' WHERE id = ?",
+                            (row["id"],),
+                        )
+                        conn.commit()
+                        removed += 1
+                except Exception as e:
+                    logger.warning("Error checking track %s: %s", row["id"], e)
         logger.info("Pruned %d missing tracks", removed)
         return removed
 
     @staticmethod
     def _tag_value(tags, key: str) -> Optional[str]:
-        for fmt_key in (key, key.upper(), key.capitalize()):
+        keys_to_try = _TAG_MAP.get(key, (key,))
+        for fmt_key in keys_to_try:
             val = tags.get(fmt_key)
-            if val:
-                if isinstance(val, list):
-                    val = val[0]
-                return str(val).strip()
+            if not val:
+                continue
+            if hasattr(val, "text"):
+                text_list = val.text
+                if text_list:
+                    return str(text_list[0]).strip()
+                continue
+            if isinstance(val, list):
+                if val:
+                    return str(val[0]).strip()
+                continue
+            return str(val).strip()
         return None
 
     @staticmethod
@@ -160,5 +230,6 @@ class LibraryScanner:
     def _get_duration(audio) -> Optional[float]:
         try:
             return audio.info.length
-        except Exception:
+        except Exception as e:
+            logger.debug("Could not get duration: %s", e)
             return None

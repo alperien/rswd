@@ -18,101 +18,139 @@ def shell(ctx: click.Context):
     """Interactive search & download shell."""
     config: ConfigData = ctx.obj["config"]
 
-    while True:
-        try:
-            query = input("> ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            break
-        if not query:
-            continue
-        if query in ("exit", "quit", "q"):
-            break
-
+    try:
         searcher = Searcher()
-        try:
-            results = searcher.search_album(query)
-        finally:
-            searcher.close()
-
-        if not results:
-            print("  no results")
-            continue
-
-        for i, r in enumerate(results, 1):
-            yr = r.year or "????"
-            tc = r.track_count or "?"
-            print(f"  {i:2d}. [{r.service}] {r.artist} - {r.album} ({yr}) [{tc}t]")
-
-        try:
-            sel = input("  # ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            break
-
-        if not sel.isdigit() or int(sel) < 1 or int(sel) > len(results):
-            continue
-
-        hit = results[int(sel) - 1]
-        print(f"  downloading {hit.artist} - {hit.album}...")
-
         repo = Repository(config.core.library_db)
         backend = StreamripBackend(config)
+    except Exception as e:
+        click.echo(f"Failed to initialize: {e}")
+        return
 
-        artist_obj = repo.get_artist_by_name(hit.artist)
-        if not artist_obj:
-            aid = repo.add_artist(name=hit.artist, is_monitored=False)
-            artist_obj = repo.get_artist(aid)
-        if not artist_obj:
-            print("  failed: could not create artist")
-            continue
+    try:
+        while True:
+            try:
+                query = input("> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                break
+            if not query:
+                continue
+            if query in ("exit", "quit", "q"):
+                break
 
-        existing = [a for a in repo.list_albums(artist_id=artist_obj.id)
-                    if a.title.lower() == hit.title.lower()]
-        if existing:
-            album_id = existing[0].id
-        else:
-            album_id = repo.add_album(
-                artist_id=artist_obj.id, title=hit.title, year=hit.year,
-                album_type="album", service=hit.service, service_id=hit.service_id,
-            ) or 0
-        if not album_id:
-            print("  failed: could not create album")
-            continue
+            try:
+                results = searcher.search_album(query)
+            except Exception as e:
+                print(f"  search error: {e}")
+                continue
 
-        info = backend.get_album_info(hit.service, hit.service_id)
-        download_path = Path(config.core.download_path) / "incoming" / hit.service_id
+            if not results:
+                print("  no results")
+                continue
 
-        track_map: dict[int, int] = {}
-        for t in info.tracks:
-            tid = repo.add_track(
-                album_id=album_id, title=t.title,
-                track_number=t.track_number, disc_number=t.disc_number,
-                duration=t.duration_s, artist=t.artist,
-            )
-            track_map[t.track_number] = tid
+            for i, r in enumerate(results, 1):
+                yr = r.year or "????"
+                tc = r.track_count or "?"
+                print(f"  {i:2d}. [{r.service}] {r.artist} - {r.album or r.title} ({yr}) [{tc}t]")
 
-        results_dl = backend.download_album(hit.service, hit.service_id, info, download_path)
-        pipeline = DownloadPipeline(config, repo)
+            try:
+                sel = input("  # ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                break
 
-        done = 0
-        for r_dl in results_dl:
-            tn = r_dl.track_info.track_number
-            matched_tid = track_map.get(tn)
-            if r_dl.success and r_dl.file_path.exists() and matched_tid is not None:
+            if not sel.isdigit() or int(sel) < 1 or int(sel) > len(results):
+                continue
+
+            hit = results[int(sel) - 1]
+            print(f"  downloading {hit.artist} - {hit.album or hit.title}...")
+
+            artist_obj = repo.get_artist_by_name(hit.artist)
+            if not artist_obj:
+                aid = repo.add_artist(name=hit.artist, is_monitored=False)
+                artist_obj = repo.get_artist(aid)
+            if not artist_obj:
+                print("  failed: could not create artist")
+                continue
+
+            existing = [a for a in repo.list_albums(artist_id=artist_obj.id)
+                        if a.title.lower() == hit.title.lower()]
+            if existing:
+                album_id = existing[0].id
+            else:
+                album_id = repo.add_album(
+                    artist_id=artist_obj.id, title=hit.title, year=hit.year,
+                    album_type="album", service=hit.service, service_id=hit.service_id,
+                )
+            if album_id is None or album_id == -1:
+                print("  failed: could not create album")
+                continue
+
+            try:
+                info = backend.get_album_info(hit.service, hit.service_id)
+            except Exception as e:
+                print(f"  error fetching album info: {e}")
+                continue
+
+            download_path = Path(config.core.download_path) / "incoming" / hit.service_id
+            download_path.mkdir(parents=True, exist_ok=True)
+
+            track_map: dict[tuple[int, int], int] = {}
+            existing_tracks = repo.list_albums(artist_id=artist_obj.id)
+            for et in repo.list_tracks(album_id):
+                if et.track_number is not None:
+                    track_map[(et.disc_number, et.track_number)] = et.id
+
+            results_dl = backend.download_album(hit.service, hit.service_id, info, download_path)
+            pipeline = DownloadPipeline(config, repo)
+
+            done = 0
+            failed = 0
+            for r_dl in results_dl:
+                tn = r_dl.track_info.track_number
+                dn = r_dl.track_info.disc_number or 1
+                if not r_dl.success or r_dl.file_path is None or not r_dl.file_path.is_file():
+                    print(f"  FAIL: track {tn} - {r_dl.error or 'download failed'}")
+                    failed += 1
+                    continue
+                matched_tid = track_map.get((dn, tn))
+                if matched_tid is None:
+                    tid = repo.add_track(
+                        album_id=album_id, title=r_dl.track_info.title,
+                        track_number=tn, disc_number=dn,
+                        duration=r_dl.track_info.duration_s, artist=r_dl.track_info.artist,
+                        isrc=r_dl.track_info.isrc,
+                    )
+                    track_map[(dn, tn)] = tid
+                    matched_tid = tid
                 try:
-                    pipeline.process_track(
+                    proc_result = pipeline.process_track(
                         source=r_dl.file_path, album_id=album_id, track_id=matched_tid,
-                        album_artist=hit.artist, album_title=hit.title,
+                        album_artist=hit.artist, album_title=hit.album or hit.title,
                         year=hit.year, track_num=tn,
                         track_artist=r_dl.track_info.artist,
                         track_title=r_dl.track_info.title, service=hit.service,
                     )
-                    done += 1
+                    if proc_result is not None:
+                        done += 1
+                    else:
+                        print(f"  FAIL: track {tn} - processing returned None")
+                        failed += 1
                 except Exception as e:
                     print(f"  error on track {tn}: {e}")
+                    failed += 1
 
-        if done:
-            repo.update_album_status(album_id, "downloaded")
+            if done:
+                repo.update_album_status(album_id, "complete")
 
-        print(f"  done: {done}/{len(results_dl)} tracks")
+            status_msg = f"  done: {done}/{len(results_dl)} tracks"
+            if failed:
+                status_msg += f" ({failed} failed)"
+            print(status_msg)
+    finally:
+        searcher.close()
+        repo.close()
+        try:
+            backend.close()
+        except Exception:
+            pass

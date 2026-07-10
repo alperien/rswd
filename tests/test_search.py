@@ -23,8 +23,7 @@ def test_search_album_deezer(httpx_mock):
         },
         url="https://api.deezer.com/search/album?q=OK+Computer",
     )
-    searcher = Searcher()
-    try:
+    with Searcher() as searcher:
         results = searcher.search_album("OK Computer")
         assert len(results) == 1
         assert results[0].title == "OK Computer"
@@ -33,28 +32,20 @@ def test_search_album_deezer(httpx_mock):
         assert results[0].track_count == 12
         assert results[0].service == "deezer"
         assert results[0].service_id == "12345"
-    finally:
-        searcher.close()
 
 
 def test_search_album_empty(httpx_mock):
     httpx_mock.add_response(json={"data": []})
-    searcher = Searcher()
-    try:
+    with Searcher() as searcher:
         results = searcher.search_album("NonexistentAlbumXYZ")
         assert results == []
-    finally:
-        searcher.close()
 
 
 def test_search_album_http_error(httpx_mock):
-    httpx_mock.add_response(status_code=503)
-    searcher = Searcher()
-    try:
+    httpx_mock.add_response(status_code=503, url="https://api.deezer.com/search/album?q=Fail")
+    with Searcher() as searcher:
         results = searcher.search_album("Fail")
         assert results == []
-    finally:
-        searcher.close()
 
 
 def test_search_artist_deezer(httpx_mock):
@@ -71,35 +62,26 @@ def test_search_artist_deezer(httpx_mock):
         },
         url="https://api.deezer.com/search/artist?q=Radiohead",
     )
-    searcher = Searcher()
-    try:
+    with Searcher() as searcher:
         results = searcher.search_artist("Radiohead")
         assert len(results) == 1
         assert results[0].title == "Radiohead"
         assert results[0].service_id == "1"
         assert results[0].hit_type == "artist"
-    finally:
-        searcher.close()
 
 
 def test_search_artist_empty(httpx_mock):
     httpx_mock.add_response(json={"data": []})
-    searcher = Searcher()
-    try:
+    with Searcher() as searcher:
         results = searcher.search_artist("Nobody")
         assert results == []
-    finally:
-        searcher.close()
 
 
 def test_search_artist_http_error(httpx_mock):
-    httpx_mock.add_response(status_code=500)
-    searcher = Searcher()
-    try:
+    httpx_mock.add_response(status_code=500, url="https://api.deezer.com/search/artist?q=Fail")
+    with Searcher() as searcher:
         results = searcher.search_artist("Fail")
         assert results == []
-    finally:
-        searcher.close()
 
 
 def test_search_album_without_release_date(httpx_mock):
@@ -117,14 +99,11 @@ def test_search_album_without_release_date(httpx_mock):
             ]
         },
     )
-    searcher = Searcher()
-    try:
+    with Searcher() as searcher:
         results = searcher.search_album("No Date")
         assert len(results) == 1
         assert results[0].year is None
         assert results[0].track_count is None
-    finally:
-        searcher.close()
 
 
 def test_search_album_fallback_to_deezer_for_tidal(httpx_mock):
@@ -141,14 +120,12 @@ def test_search_album_fallback_to_deezer_for_tidal(httpx_mock):
                 }
             ]
         },
+        url="https://api.deezer.com/search/album?q=Album",
     )
-    searcher = Searcher()
-    try:
+    with Searcher() as searcher:
         results = searcher.search_album("Album", service="tidal")
         assert len(results) == 1
         assert results[0].service == "deezer"
-    finally:
-        searcher.close()
 
 
 def test_search_album_unknown_service(httpx_mock):
@@ -166,26 +143,22 @@ def test_search_album_unknown_service(httpx_mock):
             ]
         },
     )
-    searcher = Searcher()
-    try:
+    with Searcher() as searcher:
         results = searcher.search_album("Some Album", service="unknown")
         assert len(results) == 1
         assert results[0].service == "deezer"
-    finally:
-        searcher.close()
 
 
-def test_search_no_results_truncated(httpx_mock):
+def test_search_results_truncated(httpx_mock):
     httpx_mock.add_response(json={"data": [{"id": i, "title": f"Album {i}", "artist": {"id": 1, "name": "A"}} for i in range(20)]})
-    searcher = Searcher()
-    try:
+    with Searcher() as searcher:
         results = searcher.search_album("A")
         assert len(results) <= 15
-    finally:
-        searcher.close()
 
 
 def test_close_is_idempotent():
     searcher = Searcher()
     searcher.close()
+    assert searcher._client.is_closed
     searcher.close()
+    assert searcher._client.is_closed

@@ -17,8 +17,11 @@ _FS_RESERVED_NAMES = {
 
 
 def sanitize_filename(name: str, max_len: int = 200) -> str:
+    if max_len < 1:
+        raise ValueError(f"max_len must be at least 1, got {max_len}")
+    name = name.replace("\x00", "")
     name = _FS_ILLEGAL_CHARS.sub("", name).strip()
-    name = name.rstrip(". ")
+    name = re.sub(r"[\s.]+$", "", name)
     if sys.platform == "win32" and name.lower() in _FS_RESERVED_NAMES:
         name = f"_{name}"
     if len(name) > max_len:
@@ -27,7 +30,7 @@ def sanitize_filename(name: str, max_len: int = 200) -> str:
             name = base[: max_len - len(ext) - 1] + "." + ext
         else:
             name = name[:max_len]
-    return name
+    return name if name else "_"
 
 
 def normalize_name(name: str, filesystem: bool = False) -> str:
@@ -38,13 +41,25 @@ def normalize_name(name: str, filesystem: bool = False) -> str:
 
 
 def paths_match(db_path: str, fs_path: str) -> bool:
-    return unicodedata.normalize("NFC", db_path) == unicodedata.normalize("NFC", fs_path)
+    form = "NFD" if sys.platform == "darwin" else "NFC"
+    a = unicodedata.normalize(form, db_path)
+    b = unicodedata.normalize(form, fs_path)
+    if sys.platform in ("win32", "darwin"):
+        return a.casefold() == b.casefold()
+    return a == b
 
 
 def validate_path_length(path: Path) -> Path:
-    resolved = path.resolve()
-    if sys.platform == "win32" and len(str(resolved)) > MAX_PATH - 12:
-        resolved = Path("\\\\?\\") / resolved
+    try:
+        resolved = path.resolve()
+    except OSError:
+        if sys.platform == "win32":
+            resolved = Path("\\\\?\\") / path.absolute()
+        else:
+            raise
+    else:
+        if sys.platform == "win32" and len(str(resolved)) > MAX_PATH - 12:
+            resolved = Path("\\\\?\\") / resolved
     if len(str(resolved)) > 32767:
         raise OSError(f"Path too long: {resolved}")
     return resolved

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import click
 
+from rswd import __version__
 from rswd.config import load_config, default_config_dir, default_data_dir
 from rswd.db.schema import ensure_schema
 from rswd.log import setup_logging
@@ -13,6 +14,7 @@ logger = logging.getLogger("rswd.cli")
 
 
 @click.group()
+@click.version_option(version=__version__, prog_name="rswd-cli")
 @click.option("--config", "-c", default=None, help="Config file path")
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
 @click.pass_context
@@ -29,6 +31,7 @@ def cli(ctx: click.Context, config: str | None, verbose: bool):
     setup_logging(log_dir, cfg.core.log_level, verbose)
 
     db_path = cfg.core.library_db
+    db_path = str(Path(db_path).expanduser().resolve())
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     ensure_schema(db_path)
 

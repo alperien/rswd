@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclass(frozen=True)
@@ -17,7 +17,7 @@ class SearchResult:
     duration_s: Optional[int] = None
     track_count: Optional[int] = None
     cover_url: Optional[str] = None
-    extra: dict = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -58,7 +58,7 @@ class AlbumInfo:
 @dataclass
 class DownloadResult:
     track_info: TrackInfo
-    file_path: Path
+    file_path: Optional[Path]
     success: bool
     error: Optional[str] = None
 

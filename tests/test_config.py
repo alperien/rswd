@@ -16,6 +16,7 @@ def test_default_config_dir_is_absolute():
     d = default_config_dir()
     assert isinstance(d, Path)
     assert d.is_absolute()
+    assert d.name == "rswd"
 
 
 def test_config_overrides_via_env(monkeypatch):

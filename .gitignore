@@ -14,3 +14,4 @@ coverage.xml
 .env
 venv/
 .venv/
+config.toml

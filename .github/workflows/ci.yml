@@ -7,9 +7,31 @@ on:
     branches: [main]
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Ruff
+        run: ruff check src/
+
+      - name: Mypy
+        run: mypy src/rswd/
+
   test:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.11", "3.12", "3.13"]
@@ -29,6 +51,10 @@ jobs:
       - name: Install system deps (macOS)
         if: runner.os == 'macOS'
         run: brew install ffmpeg
+
+      - name: Install system deps (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg
 
       - name: Install Python deps
         run: |

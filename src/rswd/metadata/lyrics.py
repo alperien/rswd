@@ -15,6 +15,12 @@ class LyricsEnricher:
         self._lrclib = LRCLibProvider()
         self.prefer_synced = prefer_synced
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
     def fetch_and_embed(
         self,
         file_path: str,
@@ -38,7 +44,7 @@ class LyricsEnricher:
                 audio.add_tags()
                 tags = audio.tags
 
-            text = lyrics.synced if (lyrics.synced and self.prefer_synced) else lyrics.plain
+            text = lyrics.synced if (lyrics.synced is not None and self.prefer_synced) else lyrics.plain
             if not text:
                 return False
 

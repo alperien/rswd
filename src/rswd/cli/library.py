@@ -37,7 +37,11 @@ def library_status(ctx: click.Context):
 @click.option("--path", default=None, help="Directory to scan (default: download_path)")
 @click.pass_context
 def library_scan(ctx: click.Context, path: str | None):
-    """Scan a directory for music files and import into the database."""
+    """Scan a directory for music files and import into the database.
+
+    NOTE: This command is functionally identical to 'library import' when no
+    --dry-run flag is used. Consider using 'library import' instead.
+    """
     config = ctx.obj["config"]
     scan_path = path or config.core.download_path
     click.echo(f"Scanning {scan_path}...")
@@ -76,16 +80,17 @@ def library_import(ctx: click.Context, source: str, dry_run: bool):
     config = ctx.obj["config"]
     repo = Repository(config.core.library_db)
     with repo:
-        scanner = LibraryScanner(repo)
         if dry_run:
             click.echo(f"Dry-run scan of {source}...")
-            stats = scanner.scan_directory(source)
+            scanner = LibraryScanner(repo)
+            stats = scanner.preview_directory(source)
             click.echo(f"Would scan:  {stats['scanned']}")
             click.echo(f"Would import: {stats['imported']}")
             click.echo(f"Already matched: {stats['matched']}")
             return
 
         click.echo(f"Importing from {source}...")
+        scanner = LibraryScanner(repo)
         stats = scanner.scan_directory(source)
         click.echo(f"Scanned:  {stats['scanned']}")
         click.echo(f"Imported: {stats['imported']}")

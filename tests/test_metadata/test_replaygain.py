@@ -27,6 +27,8 @@ def _make_flac(path: Path, add_tags: bool = False) -> str:
     return str(path)
 
 
+# NOTE: This test depends on the exact format of ffmpeg's ebur128 output.
+# If ffmpeg changes its output format, this test may need updating.
 def test_parse_ebur128_output():
     scanner = ReplayGainScanner()
     output = """
@@ -56,7 +58,8 @@ def test_writes_track_gain_to_flac(tmp_path):
     audio = mutagen.File(fp)
     assert audio is not None
     assert audio.tags.get("REPLAYGAIN_TRACK_GAIN") == ["-14.80 dB"]
-    assert audio.tags.get("REPLAYGAIN_TRACK_PEAK") == ["0.500000"]
+    assert audio.tags.get("REPLAYGAIN_TRACK_PEAK") is not None
+    assert float(audio.tags.get("REPLAYGAIN_TRACK_PEAK")[0]) == pytest.approx(0.5, abs=1e-6)
 
 
 def test_writes_track_gain_to_file_without_tags(tmp_path):

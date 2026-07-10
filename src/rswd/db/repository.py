@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
+import threading
 import unicodedata
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
-from rswd.db.models import Album, Artist, DownloadLogEntry, SchedulerLogEntry, Track
+from rswd.db.models import Album, Artist, Track
+
+logger = logging.getLogger(__name__)
+
+STATUS_DOWNLOADED = "downloaded"
 
 
 def _unicode_nocase(a: str, b: str) -> int:
+    # Note: could be optimized with caching if profiling shows string creation is hot
     a = unicodedata.normalize("NFC", a).casefold()
     b = unicodedata.normalize("NFC", b).casefold()
     return (a > b) - (a < b)
@@ -18,22 +26,54 @@ class Repository:
     def __init__(self, db_path: str):
         self.db_path = str(Path(db_path).resolve())
         self._conn: sqlite3.Connection | None = None
+        self._lock = threading.RLock()
 
     def connect(self) -> sqlite3.Connection:
-        if self._conn is None:
-            self._conn = sqlite3.connect(self.db_path)
-            self._conn.execute("PRAGMA journal_mode=WAL")
-            self._conn.execute("PRAGMA foreign_keys=ON")
-            self._conn.create_collation("UNICODE_NOCASE", _unicode_nocase)
-            self._conn.row_factory = sqlite3.Row
-        return self._conn
+        with self._lock:
+            if self._conn is None:
+                self._conn = sqlite3.connect(
+                    self.db_path, check_same_thread=False, isolation_level=""
+                )
+                wal = self._conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+                if wal != "wal":
+                    logger.warning("Failed to enable WAL mode, got: %s", wal)
+                self._conn.execute("PRAGMA foreign_keys=ON")
+                fk = self._conn.execute("PRAGMA foreign_keys").fetchone()[0]
+                if not fk:
+                    logger.warning("Failed to enable foreign_keys pragma")
+                self._conn.execute("PRAGMA busy_timeout = 10000")
+                self._conn.create_collation("UNICODE_NOCASE", _unicode_nocase)
+                self._conn.row_factory = sqlite3.Row
+            return self._conn
 
     def close(self):
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
+        with self._lock:
+            if self._conn is not None:
+                try:
+                    self._conn.close()
+                finally:
+                    self._conn = None
 
-    def __enter__(self) -> "Repository":
+    def __del__(self):
+        try:
+            if self._conn is not None:
+                self.close()
+        except Exception:
+            pass
+
+    @contextmanager
+    def transaction(self):
+        with self._lock:
+            conn = self._conn or self.connect()
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                yield conn
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+
+    def __enter__(self) -> Repository:
         self.connect()
         return self
 
@@ -51,50 +91,85 @@ class Repository:
         monitor_quality: int = 2,
         metadata_blob: str | None = None,
     ) -> int:
-        conn = self.connect()
-        cur = conn.execute(
-            """INSERT INTO artists (name, sort_name, mb_artistid, is_monitored, monitor_quality, metadata_blob)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (name, sort_name, mb_artistid, int(is_monitored), monitor_quality, metadata_blob),
-        )
-        conn.commit()
-        return cur.lastrowid  # type: ignore[return-value]
+        with self._lock:
+            conn = self.connect()
+            try:
+                cur = conn.execute(
+                    """INSERT INTO artists (name, sort_name, mb_artistid, is_monitored, monitor_quality, metadata_blob)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (name, sort_name, mb_artistid, int(is_monitored), monitor_quality, metadata_blob),
+                )
+            except sqlite3.IntegrityError:
+                return -1
+            conn.commit()
+            if cur.lastrowid is None:
+                raise RuntimeError("INSERT succeeded but lastrowid is None")
+            return cur.lastrowid
 
     def get_artist(self, artist_id: int) -> Optional[Artist]:
-        row = self.connect().execute(
-            "SELECT * FROM artists WHERE id = ?", (artist_id,)
-        ).fetchone()
-        return self._row_to_artist(row) if row else None
+        with self._lock:
+            row = self.connect().execute(
+                "SELECT * FROM artists WHERE id = ?", (artist_id,)
+            ).fetchone()
+            return self._row_to_artist(row) if row else None
 
     def get_artist_by_name(self, name: str) -> Optional[Artist]:
-        row = self.connect().execute(
-            "SELECT * FROM artists WHERE name = ? COLLATE UNICODE_NOCASE", (name,)
-        ).fetchone()
-        return self._row_to_artist(row) if row else None
+        # COLLATE UNICODE_NOCASE bypasses any index on the name column;
+        # all matching rows must be scanned. Consider a generated column
+        # with an index if this becomes a bottleneck.
+        with self._lock:
+            row = self.connect().execute(
+                "SELECT * FROM artists WHERE name = ? COLLATE UNICODE_NOCASE", (name,)
+            ).fetchone()
+            return self._row_to_artist(row) if row else None
 
-    def list_artists(self, monitored_only: bool = False) -> list[Artist]:
-        query = "SELECT * FROM artists"
-        params: tuple = ()
-        if monitored_only:
-            query += " WHERE is_monitored = 1"
-        query += " ORDER BY name COLLATE UNICODE_NOCASE"
-        rows = self.connect().execute(query, params).fetchall()
-        return [self._row_to_artist(r) for r in rows]
+    def list_artists(
+        self,
+        monitored_only: bool = False,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> list[Artist]:
+        with self._lock:
+            query = "SELECT * FROM artists"
+            params: list = []
+            if monitored_only:
+                query += " WHERE is_monitored = 1"
+            query += " ORDER BY name COLLATE UNICODE_NOCASE"
+            if limit is not None:
+                query += " LIMIT ?"
+                params.append(limit)
+            if offset is not None:
+                query += " OFFSET ?"
+                params.append(offset)
+            rows = self.connect().execute(query, params).fetchall()
+            return [self._row_to_artist(r) for r in rows]
 
     def remove_artist(self, artist_id: int) -> bool:
-        conn = self.connect()
-        cur = conn.execute("DELETE FROM artists WHERE id = ?", (artist_id,))
-        conn.commit()
-        return cur.rowcount > 0
+        with self.transaction() as conn:
+            album_count = conn.execute(
+                "SELECT COUNT(*) FROM albums WHERE artist_id = ?", (artist_id,)
+            ).fetchone()[0]
+            track_count = conn.execute(
+                "SELECT COUNT(*) FROM tracks WHERE album_id IN (SELECT id FROM albums WHERE artist_id = ?)",
+                (artist_id,),
+            ).fetchone()[0]
+            if album_count or track_count:
+                logger.info(
+                    "Removing artist %d: cascading delete of %d albums and %d tracks",
+                    artist_id, album_count, track_count,
+                )
+            cur = conn.execute("DELETE FROM artists WHERE id = ?", (artist_id,))
+            return cur.rowcount > 0
 
     def set_monitored(self, artist_id: int, monitored: bool) -> bool:
-        conn = self.connect()
-        cur = conn.execute(
-            "UPDATE artists SET is_monitored = ? WHERE id = ?",
-            (int(monitored), artist_id),
-        )
-        conn.commit()
-        return cur.rowcount > 0
+        with self._lock:
+            conn = self.connect()
+            cur = conn.execute(
+                "UPDATE artists SET is_monitored = ? WHERE id = ?",
+                (int(monitored), artist_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
 
     # --- Albums ---
 
@@ -105,72 +180,91 @@ class Repository:
         year: int | None = None,
         album_type: str | None = None,
         mb_albumid: str | None = None,
+        mb_release_groupid: str | None = None,
         total_tracks: int | None = None,
         service: str | None = None,
         service_id: str | None = None,
         quality_tier: int | None = None,
         metadata_blob: str | None = None,
     ) -> int:
-        conn = self.connect()
-        cur = conn.execute(
-            """INSERT INTO albums (artist_id, title, year, album_type, mb_albumid, total_tracks,
-               service, service_id, quality_tier, metadata_blob)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (artist_id, title, year, album_type, mb_albumid, total_tracks,
-             service, service_id, quality_tier, metadata_blob),
-        )
-        conn.commit()
-        return cur.lastrowid  # type: ignore[return-value]
+        with self._lock:
+            conn = self.connect()
+            try:
+                cur = conn.execute(
+                    """INSERT INTO albums (artist_id, title, year, album_type, mb_albumid,
+                       mb_release_groupid, total_tracks, service, service_id, quality_tier, metadata_blob)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (artist_id, title, year, album_type, mb_albumid, mb_release_groupid,
+                     total_tracks, service, service_id, quality_tier, metadata_blob),
+                )
+            except sqlite3.IntegrityError:
+                return -1
+            conn.commit()
+            if cur.lastrowid is None:
+                raise RuntimeError("INSERT succeeded but lastrowid is None")
+            return cur.lastrowid
 
     def album_exists(self, artist_id: int, title: str, year: int | None = None) -> bool:
-        if year is not None:
-            row = self.connect().execute(
-                "SELECT 1 FROM albums WHERE artist_id = ? AND title = ? COLLATE UNICODE_NOCASE AND year = ?",
-                (artist_id, title, year),
-            ).fetchone()
-        else:
-            row = self.connect().execute(
-                "SELECT 1 FROM albums WHERE artist_id = ? AND title = ? COLLATE UNICODE_NOCASE",
-                (artist_id, title),
-            ).fetchone()
-        return row is not None
+        with self._lock:
+            if year is not None:
+                row = self.connect().execute(
+                    "SELECT 1 FROM albums WHERE artist_id = ? AND title = ? AND year = ?",
+                    (artist_id, title, year),
+                ).fetchone()
+            else:
+                row = self.connect().execute(
+                    "SELECT 1 FROM albums WHERE artist_id = ? AND title = ? AND year IS NULL",
+                    (artist_id, title),
+                ).fetchone()
+            return row is not None
 
     def get_album(self, album_id: int) -> Optional[Album]:
-        row = self.connect().execute(
-            "SELECT * FROM albums WHERE id = ?", (album_id,)
-        ).fetchone()
-        return self._row_to_album(row) if row else None
+        with self._lock:
+            row = self.connect().execute(
+                "SELECT * FROM albums WHERE id = ?", (album_id,)
+            ).fetchone()
+            return self._row_to_album(row) if row else None
 
     def list_albums(
         self,
         artist_id: int | None = None,
         status: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> list[Album]:
-        query = "SELECT * FROM albums WHERE 1=1"
-        params: list = []
-        if artist_id is not None:
-            query += " AND artist_id = ?"
-            params.append(artist_id)
-        if status:
-            query += " AND download_status = ?"
-            params.append(status)
-        query += " ORDER BY year DESC, title COLLATE UNICODE_NOCASE"
-        rows = self.connect().execute(query, params).fetchall()
-        return [self._row_to_album(r) for r in rows]
+        with self._lock:
+            query = "SELECT * FROM albums WHERE 1=1"
+            params: list = []
+            if artist_id is not None:
+                query += " AND artist_id = ?"
+                params.append(artist_id)
+            if status:
+                query += " AND download_status = ?"
+                params.append(status)
+            query += " ORDER BY year IS NULL, year DESC, title COLLATE UNICODE_NOCASE"
+            if limit is not None:
+                query += " LIMIT ?"
+                params.append(limit)
+            if offset is not None:
+                query += " OFFSET ?"
+                params.append(offset)
+            rows = self.connect().execute(query, params).fetchall()
+            return [self._row_to_album(r) for r in rows]
 
     def update_album_status(self, album_id: int, status: str, quality_tier: int | None = None):
-        conn = self.connect()
-        if quality_tier is not None:
-            conn.execute(
-                "UPDATE albums SET download_status = ?, quality_tier = ? WHERE id = ?",
-                (status, quality_tier, album_id),
-            )
-        else:
-            conn.execute(
-                "UPDATE albums SET download_status = ? WHERE id = ?",
-                (status, album_id),
-            )
-        conn.commit()
+        with self._lock:
+            conn = self.connect()
+            if quality_tier is not None:
+                conn.execute(
+                    "UPDATE albums SET download_status = ?, quality_tier = ? WHERE id = ?",
+                    (status, quality_tier, album_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE albums SET download_status = ? WHERE id = ?",
+                    (status, album_id),
+                )
+            conn.commit()
 
     # --- Tracks ---
 
@@ -186,16 +280,22 @@ class Repository:
         mb_recording_id: str | None = None,
         service_id: str | None = None,
     ) -> int:
-        conn = self.connect()
-        cur = conn.execute(
-            """INSERT INTO tracks (album_id, title, track_number, disc_number, duration, artist,
-               isrc, mb_recording_id, service_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (album_id, title, track_number, disc_number, duration, artist,
-             isrc, mb_recording_id, service_id),
-        )
-        conn.commit()
-        return cur.lastrowid  # type: ignore[return-value]
+        with self._lock:
+            conn = self.connect()
+            try:
+                cur = conn.execute(
+                    """INSERT INTO tracks (album_id, title, track_number, disc_number, duration, artist,
+                       isrc, mb_recording_id, service_id)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (album_id, title, track_number, disc_number, duration, artist,
+                     isrc, mb_recording_id, service_id),
+                )
+            except sqlite3.IntegrityError:
+                return -1
+            conn.commit()
+            if cur.lastrowid is None:
+                raise RuntimeError("INSERT succeeded but lastrowid is None")
+            return cur.lastrowid
 
     def update_track_file(
         self,
@@ -205,28 +305,32 @@ class Repository:
         bitrate: int | None = None,
         sample_rate: int | None = None,
         bit_depth: int | None = None,
-    ):
-        conn = self.connect()
-        conn.execute(
-            """UPDATE tracks SET file_path = ?, file_format = ?, bitrate = ?,
-               sample_rate = ?, bit_depth = ?, download_status = 'downloaded'
-               WHERE id = ?""",
-            (file_path, file_format, bitrate, sample_rate, bit_depth, track_id),
-        )
-        conn.commit()
+    ) -> bool:
+        with self._lock:
+            conn = self.connect()
+            cur = conn.execute(
+                """UPDATE tracks SET file_path = ?, file_format = ?, bitrate = ?,
+                   sample_rate = ?, bit_depth = ?, download_status = ?
+                   WHERE id = ?""",
+                (file_path, file_format, bitrate, sample_rate, bit_depth, STATUS_DOWNLOADED, track_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
 
     def list_tracks(self, album_id: int) -> list[Track]:
-        rows = self.connect().execute(
-            "SELECT * FROM tracks WHERE album_id = ? ORDER BY disc_number, track_number",
-            (album_id,),
-        ).fetchall()
-        return [self._row_to_track(r) for r in rows]
+        with self._lock:
+            rows = self.connect().execute(
+                "SELECT * FROM tracks WHERE album_id = ? ORDER BY disc_number, track_number",
+                (album_id,),
+            ).fetchall()
+            return [self._row_to_track(r) for r in rows]
 
     def get_track_by_path(self, file_path: str) -> Optional[Track]:
-        row = self.connect().execute(
-            "SELECT * FROM tracks WHERE file_path = ?", (file_path,)
-        ).fetchone()
-        return self._row_to_track(row) if row else None
+        with self._lock:
+            row = self.connect().execute(
+                "SELECT * FROM tracks WHERE file_path = ?", (file_path,)
+            ).fetchone()
+            return self._row_to_track(row) if row else None
 
     # --- Download Log ---
 
@@ -239,31 +343,37 @@ class Repository:
         file_size: int | None = None,
         checksum: str | None = None,
     ) -> int:
-        conn = self.connect()
-        cur = conn.execute(
-            """INSERT INTO download_log (track_id, service, quality, file_path, file_size, checksum)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (track_id, service, quality, file_path, file_size, checksum),
-        )
-        conn.commit()
-        return cur.lastrowid  # type: ignore[return-value]
+        with self._lock:
+            conn = self.connect()
+            cur = conn.execute(
+                """INSERT INTO download_log (track_id, service, quality, file_path, file_size, checksum)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (track_id, service, quality, file_path, file_size, checksum),
+            )
+            conn.commit()
+            if cur.lastrowid is None:
+                raise RuntimeError("INSERT succeeded but lastrowid is None")
+            return cur.lastrowid
 
     # --- Library stats ---
 
     def library_stats(self) -> dict:
-        conn = self.connect()
-        artists = conn.execute("SELECT COUNT(*) FROM artists").fetchone()[0]
-        albums = conn.execute("SELECT COUNT(*) FROM albums").fetchone()[0]
-        tracks = conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
-        downloaded = conn.execute(
-            "SELECT COUNT(*) FROM tracks WHERE download_status = 'downloaded'"
-        ).fetchone()[0]
-        return {
-            "artists": artists,
-            "albums": albums,
-            "tracks": tracks,
-            "downloaded": downloaded,
-        }
+        with self._lock:
+            conn = self.connect()
+            row = conn.execute(
+                """SELECT
+                    (SELECT COUNT(*) FROM artists) AS artists,
+                    (SELECT COUNT(*) FROM albums) AS albums,
+                    (SELECT COUNT(*) FROM tracks) AS tracks,
+                    (SELECT COUNT(*) FROM tracks WHERE download_status = ?) AS downloaded""",
+                (STATUS_DOWNLOADED,),
+            ).fetchone()
+            return {
+                "artists": row["artists"],
+                "albums": row["albums"],
+                "tracks": row["tracks"],
+                "downloaded": row["downloaded"],
+            }
 
     # --- Row mapping ---
 
@@ -274,7 +384,7 @@ class Repository:
             name=row["name"],
             sort_name=row["sort_name"],
             mb_artistid=row["mb_artistid"],
-            is_monitored=bool(row["is_monitored"]),
+            is_monitored=bool(int(row["is_monitored"])),
             monitor_quality=row["monitor_quality"],
             added_at=row["added_at"],
             metadata_blob=row["metadata_blob"],

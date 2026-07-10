@@ -39,4 +39,5 @@ def test_orpheus_album_info_not_implemented():
 
 def test_orpheus_login_and_validate():
     backend = OrpheusBackend()
-    assert backend.login_and_validate() == {}
+    with pytest.raises(NotImplementedError):
+        backend.login_and_validate()

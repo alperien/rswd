@@ -27,18 +27,21 @@ def artist_add(ctx: click.Context, name: str, service: str | None, monitor: bool
     """Add an artist by name."""
     config = ctx.obj["config"]
     repo = Repository(config.core.library_db)
-    existing = repo.get_artist_by_name(name)
-    if existing:
-        click.echo(f"Artist '{name}' already exists (id={existing.id})")
-        return
-    artist_id = repo.add_artist(
-        name=name,
-        is_monitored=monitor,
-        monitor_quality=quality,
-    )
-    click.echo(f"Added artist '{name}' (id={artist_id}, monitored={monitor})")
-    if monitor:
-        click.echo("  Monitoring enabled — daemon will check for new releases.")
+    try:
+        existing = repo.get_artist_by_name(name)
+        if existing:
+            click.echo(f"Artist '{name}' already exists (id={existing.id})")
+            return
+        artist_id = repo.add_artist(
+            name=name,
+            is_monitored=monitor,
+            monitor_quality=quality,
+        )
+        click.echo(f"Added artist '{name}' (id={artist_id}, monitored={monitor})")
+        if monitor:
+            click.echo("  Monitoring enabled — daemon will check for new releases.")
+    finally:
+        repo.close()
 
 
 @artist.command("list")
@@ -49,25 +52,30 @@ def artist_list(ctx: click.Context, monitored: bool, unmonitored: bool):
     """List all artists."""
     config = ctx.obj["config"]
     repo = Repository(config.core.library_db)
-    if monitored:
-        rows = repo.list_artists(monitored_only=True)
-    elif unmonitored:
-        rows = [a for a in repo.list_artists() if not a.is_monitored]
-    else:
-        rows = repo.list_artists()
-    if not rows:
-        click.echo("No artists found.")
-        return
-    table = Table("ID", "Name", "Monitored", "Quality", "MBID")
-    for a in rows:
-        table.add_row(
-            str(a.id),
-            a.name,
-            "yes" if a.is_monitored else "no",
-            str(a.monitor_quality),
-            a.mb_artistid or "",
-        )
-    console.print(table)
+    try:
+        if monitored:
+            rows = repo.list_artists(monitored_only=True)
+        elif unmonitored:
+            # TODO: add an unmonitored_only parameter to Repository.list_artists()
+            # to avoid fetching all artists when only unmonitored ones are needed
+            rows = [a for a in repo.list_artists() if not a.is_monitored]
+        else:
+            rows = repo.list_artists()
+        if not rows:
+            click.echo("No artists found.")
+            return
+        table = Table("ID", "Name", "Monitored", "Quality", "MBID")
+        for a in rows:
+            table.add_row(
+                str(a.id),
+                a.name,
+                "yes" if a.is_monitored else "no",
+                str(a.monitor_quality),
+                a.mb_artistid or "",
+            )
+        console.print(table)
+    finally:
+        repo.close()
 
 
 @artist.command("remove")
@@ -77,12 +85,15 @@ def artist_remove(ctx: click.Context, artist_id: int):
     """Remove an artist and all associated data."""
     config = ctx.obj["config"]
     repo = Repository(config.core.library_db)
-    artist = repo.get_artist(artist_id)
-    if not artist:
-        click.echo(f"Artist id={artist_id} not found.")
-        return
-    repo.remove_artist(artist_id)
-    click.echo(f"Removed artist '{artist.name}' (id={artist_id})")
+    try:
+        artist = repo.get_artist(artist_id)
+        if not artist:
+            click.echo(f"Artist id={artist_id} not found.")
+            return
+        repo.remove_artist(artist_id)
+        click.echo(f"Removed artist '{artist.name}' (id={artist_id})")
+    finally:
+        repo.close()
 
 
 @artist.command("monitor")
@@ -92,10 +103,13 @@ def artist_monitor(ctx: click.Context, artist_id: int):
     """Enable monitoring for an artist."""
     config = ctx.obj["config"]
     repo = Repository(config.core.library_db)
-    if repo.set_monitored(artist_id, True):
-        click.echo(f"Enabled monitoring for artist id={artist_id}")
-    else:
-        click.echo(f"Artist id={artist_id} not found.")
+    try:
+        if repo.set_monitored(artist_id, True):
+            click.echo(f"Enabled monitoring for artist id={artist_id}")
+        else:
+            click.echo(f"Artist id={artist_id} not found.")
+    finally:
+        repo.close()
 
 
 @artist.command("unmonitor")
@@ -105,7 +119,10 @@ def artist_unmonitor(ctx: click.Context, artist_id: int):
     """Disable monitoring for an artist."""
     config = ctx.obj["config"]
     repo = Repository(config.core.library_db)
-    if repo.set_monitored(artist_id, False):
-        click.echo(f"Disabled monitoring for artist id={artist_id}")
-    else:
-        click.echo(f"Artist id={artist_id} not found.")
+    try:
+        if repo.set_monitored(artist_id, False):
+            click.echo(f"Disabled monitoring for artist id={artist_id}")
+        else:
+            click.echo(f"Artist id={artist_id} not found.")
+    finally:
+        repo.close()

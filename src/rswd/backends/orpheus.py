@@ -20,6 +20,7 @@ class OrpheusBackend(SearchDownloadBackend):
 
     def search(self, media_type: str, query: str, limit: int = 10) -> list[SearchResult]:
         logger.info("OrpheusDL search: %s '%s'", media_type, query)
+        logger.warning("OrpheusDL search not yet implemented, returning empty results")
         return []
 
     def search_artist_discography(self, artist_name: str) -> dict[str, list[AlbumInfo]]:
@@ -41,4 +42,4 @@ class OrpheusBackend(SearchDownloadBackend):
         raise NotImplementedError("OrpheusBackend.download_album not yet implemented")
 
     def login_and_validate(self) -> dict[str, bool]:
-        return {}
+        raise NotImplementedError("OrpheusBackend.login_and_validate not yet implemented")

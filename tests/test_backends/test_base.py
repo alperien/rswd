@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import dataclasses
+from pathlib import Path
+
+import pytest
+
 from rswd.backends.base import SearchResult, AlbumInfo, TrackInfo, DownloadResult
 
 
@@ -13,8 +18,7 @@ def test_search_result_defaults():
 
 def test_search_result_frozen():
     r = SearchResult(service="deezer", media_type="album", service_id="1", title="Test", artists=("A",))
-    import pytest
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         r.title = "Changed"
 
 
@@ -35,14 +39,12 @@ def test_album_info_empty_tracks():
 
 
 def test_download_result_success():
-    from pathlib import Path
     r = DownloadResult(track_info=None, file_path=Path("/test"), success=True)
     assert r.success is True
     assert r.error is None
 
 
 def test_download_result_failure():
-    from pathlib import Path
     r = DownloadResult(track_info=None, file_path=Path("/test"), success=False, error="Something went wrong")
     assert r.success is False
     assert r.error == "Something went wrong"

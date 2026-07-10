@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import musicbrainzngs
 import pytest
 
 from rswd.db.repository import Repository
@@ -15,7 +16,8 @@ def repo(tmp_path):
     ensure_schema(db)
     r = Repository(db)
     r.connect()
-    return r
+    yield r
+    r.close()
 
 
 def test_enrich_artist_new_mbid(repo):
@@ -53,7 +55,7 @@ def test_enrich_artist_search_fails(repo):
     aid = repo.add_artist("Failing Artist")
     enricher = MusicBrainzEnricher(rate_limit=0)
     with patch("musicbrainzngs.search_artists") as mock_search:
-        mock_search.side_effect = Exception("API error")
+        mock_search.side_effect = musicbrainzngs.MusicBrainzError("API error")
         assert enricher.enrich_artist_in_db(repo, aid) is False
 
 

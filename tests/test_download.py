@@ -28,7 +28,8 @@ def repo(tmp_path):
     ensure_schema(db)
     r = Repository(db)
     r.connect()
-    return r
+    yield r
+    r.close()
 
 
 @pytest.fixture
@@ -62,12 +63,12 @@ class TestVerify:
         fp = _make_test_flac(tmp_path / "track.flac")
         assert pipeline.verify_file(Path(fp)) is True
 
-    def test_verify_missing_file(self, pipeline):
-        assert pipeline.verify_file(Path("/nonexistent/file.flac")) is False
+    def test_verify_missing_file(self, tmp_path, pipeline):
+        assert pipeline.verify_file(Path(str(tmp_path / "nonexistent.flac"))) is False
 
     def test_verify_empty_file(self, tmp_path, pipeline):
         f = tmp_path / "empty.flac"
-        f.write_text("")
+        f.write_bytes(b"")
         assert pipeline.verify_file(f) is False
 
 
@@ -79,6 +80,10 @@ class TestChecksum:
         c2 = pipeline.compute_checksum(f)
         assert c1 == c2
         assert len(c1) == 64  # SHA256 hex
+
+    def test_checksum_nonexistent_file(self, tmp_path, pipeline):
+        f = tmp_path / "nonexistent.bin"
+        assert pipeline.compute_checksum(f) is None
 
 
 class TestMove:
@@ -112,7 +117,10 @@ class TestProcessTrack:
         )
         assert result is not None
         assert result.exists()
+        assert not src.exists()
         track = repo.list_tracks(alid)[0]
         assert track.download_status == "downloaded"
         assert track.file_path is not None
         assert "FLAC" in (track.file_format or "")
+        stats = repo.library_stats()
+        assert stats["downloaded"] >= 1

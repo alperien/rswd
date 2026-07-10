@@ -6,7 +6,7 @@ from typing import Optional
 
 @dataclass
 class Artist:
-    id: int = 0
+    id: int = -1
     name: str = ""
     sort_name: Optional[str] = None
     mb_artistid: Optional[str] = None
@@ -18,7 +18,7 @@ class Artist:
 
 @dataclass
 class Album:
-    id: int = 0
+    id: int = -1
     artist_id: int = 0
     title: str = ""
     year: Optional[int] = None
@@ -36,7 +36,7 @@ class Album:
 
 @dataclass
 class Track:
-    id: int = 0
+    id: int = -1
     album_id: int = 0
     title: str = ""
     track_number: Optional[int] = None
@@ -57,7 +57,7 @@ class Track:
 
 @dataclass
 class DownloadLogEntry:
-    id: int = 0
+    id: int = -1
     track_id: int = 0
     service: str = ""
     quality: Optional[int] = None
@@ -69,7 +69,7 @@ class DownloadLogEntry:
 
 @dataclass
 class SchedulerLogEntry:
-    id: int = 0
+    id: int = -1
     job_name: str = ""
     started_at: str = ""
     completed_at: Optional[str] = None

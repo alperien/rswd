@@ -13,8 +13,10 @@ def test_cli_no_args_shows_help():
 
 
 def test_cli_version():
-    from rswd import __version__
-    assert __version__ == "0.1.0"
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--version"])
+    assert result.exit_code == 0
+    assert "0.1.0" in result.output
 
 
 def test_cli_help_artists():

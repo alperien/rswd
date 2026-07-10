@@ -33,7 +33,7 @@ class LRCLibProvider:
         params = {"track_name": track, "artist_name": artist}
         if album:
             params["album_name"] = album
-        if duration:
+        if duration is not None:
             params["duration"] = str(duration)
 
         try:
@@ -48,9 +48,15 @@ class LRCLibProvider:
                 synced=data.get("syncedLyrics"),
                 is_instrumental=data.get("isInstrumental", False),
             )
-        except httpx.HTTPError as e:
+        except (httpx.HTTPError, ValueError) as e:
             logger.warning("LRCLIB request failed for '%s' by %s: %s", track, artist, e)
             return None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
 
     def close(self):
         self._client.close()
