@@ -37,12 +37,10 @@ from rswd.cli.artist import artist  # noqa: E402
 from rswd.cli.album import album  # noqa: E402
 from rswd.cli.library import library  # noqa: E402
 from rswd.cli.daemon import daemon  # noqa: E402
-from rswd.cli.serve import serve  # noqa: E402
 from rswd.cli.shell import shell  # noqa: E402
 
 cli.add_command(artist)
 cli.add_command(album)
 cli.add_command(library)
 cli.add_command(daemon)
-cli.add_command(serve)
 cli.add_command(shell)

@@ -1,7 +1,0 @@
-<div class="infobar">
-  Download started: <strong>{{ artist_name }}</strong> - <strong>{{ album_title }}</strong>
-  <span class="dim">(task: {{ task_id }})</span>
-</div>
-<div hx-get="/queue/task/{{ task_id }}/status" hx-trigger="load delay:2s" hx-swap="outerHTML">
-  <div class="empty">Queued...</div>
-</div>

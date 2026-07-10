@@ -1,8 +1,0 @@
-{% extends "base.html" %}
-{% block content %}
-<h2>Search</h2>
-<input type="search" placeholder="Search albums..." name="query" hx-post="/search/query" hx-trigger="keyup changed delay:500ms" hx-target="#search-results" hx-swap="innerHTML">
-<div id="search-results">
-  <div class="empty">Type to search</div>
-</div>
-{% endblock %}
